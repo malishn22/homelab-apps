@@ -1,3 +1,11 @@
+# Env Files
 .env
 .env.*
 
+# Python
+.venv
+__pycache__
+
+# Frontend
+frontend/node_modules/
+frontend/.env.local
