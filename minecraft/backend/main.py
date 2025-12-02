@@ -1,11 +1,40 @@
 import json
+import os
+from pathlib import Path
 import requests
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
-BASE_URL = "https://api.modrinth.com/v2"
-USER_AGENT = "malishn22/homelab-apps/minecraft/0.1"
+
+def load_local_env() -> None:
+    """
+    Load environment variables from a local .env file if present without
+    overriding variables that are already set.
+    """
+    env_path = Path(__file__).resolve().parent / ".env"
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key and key not in os.environ:
+            os.environ[key.strip()] = value.strip().strip("'").strip('"')
+
+
+load_local_env()
+
+BASE_URL = os.environ.get("MODRINTH_BASE_URL")
+USER_AGENT = os.environ.get("MODRINTH_USER_AGENT")
+
+if not BASE_URL or not USER_AGENT:
+    raise RuntimeError(
+        "Missing required environment variables: MODRINTH_BASE_URL and "
+        "MODRINTH_USER_AGENT. Set them in apps/minecraft/backend/.env."
+    )
 
 def search_modrinth(query: str, limit: int = 5):
     url = f"{BASE_URL}/search"
