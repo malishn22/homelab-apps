@@ -1,10 +1,16 @@
-import json
 import os
 from pathlib import Path
 import requests
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+
+try:
+    from .modrinth_client import get_top_modpacks, get_modpack_detail
+except ImportError:  # script execution (python backend/main.py)
+    import sys
+    sys.path.append(str(Path(__file__).resolve().parent))
+    from modrinth_client import get_top_modpacks, get_modpack_detail
 
 
 def load_local_env() -> None:
@@ -76,36 +82,8 @@ def show_latest_version(slug: str):
     print(f"Latest version for {slug}: {version_number}")
     print("Download URL:", download_url)
 
-def get_top_modpacks(limit: int = 5):
-    url = f"{BASE_URL}/search"
-    headers = {"User-Agent": USER_AGENT}
-    facets = [["project_type:modpack"]]
-
-    params = {
-        "facets": json.dumps(facets),
-        "index": "downloads",  # sort by most downloaded modpacks
-        "limit": limit,
-    }
-
-    resp = requests.get(url, headers=headers, params=params, timeout=10)
-    resp.raise_for_status()
-    data = resp.json()
-    return data.get("hits", [])
-
-
-def get_modpack_detail(project_id: str):
-    """
-    Fetch a modpack's detail payload from Modrinth by project id or slug.
-    """
-    url = f"{BASE_URL}/project/{project_id}"
-    headers = {"User-Agent": USER_AGENT}
-    resp = requests.get(url, headers=headers, timeout=10)
-    resp.raise_for_status()
-    return resp.json()
-
-
 def print_top_modpacks(limit: int = 5):
-    packs = get_top_modpacks(limit)
+    packs = get_top_modpacks(base_url=BASE_URL, user_agent=USER_AGENT, limit=limit)
     print(f"Top {len(packs)} modpacks on Modrinth (by downloads):")
     for p in packs:
         print(
@@ -138,7 +116,9 @@ def api_get_top_modpacks(limit: int = Query(5, ge=1, le=50)) -> dict:
     Return the top Modrinth modpacks by downloads.
     """
     try:
-        items = get_top_modpacks(limit)
+        items = get_top_modpacks(
+            base_url=BASE_URL, user_agent=USER_AGENT, limit=limit
+        )
         return {"items": items, "count": len(items)}
     except requests.HTTPError as exc:
         raise HTTPException(
@@ -155,7 +135,9 @@ def api_get_modpack_detail(project_id: str) -> dict:
     Return detail for a single modpack.
     """
     try:
-        data = get_modpack_detail(project_id)
+        data = get_modpack_detail(
+            base_url=BASE_URL, user_agent=USER_AGENT, project_id=project_id
+        )
         return data
     except requests.HTTPError as exc:
         raise HTTPException(
@@ -171,4 +153,6 @@ if __name__ == "__main__":
     host = os.environ.get("UVICORN_HOST", "0.0.0.0")
     port = int(os.environ.get("UVICORN_PORT", "8000"))
     reload_enabled = os.environ.get("UVICORN_RELOAD", "true").lower() == "true"
-    uvicorn.run(app, host=host, port=port, reload=reload_enabled)
+    # Uvicorn reload requires an import string target
+    target = "main:app" if reload_enabled else app
+    uvicorn.run(target, host=host, port=port, reload=reload_enabled)
