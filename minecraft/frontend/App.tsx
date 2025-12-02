@@ -46,14 +46,40 @@ const App: React.FC = () => {
                                     throw new Error(`API request failed (${resp.status})`);
                                 }
                                 const data = await resp.json();
+                                const uniqLower = (arr: (string | undefined)[] | undefined) => {
+                                    const seen = new Set<string>();
+                                    return (arr || []).filter((item) => {
+                                        if (!item) return false;
+                                        const key = item.toLowerCase();
+                                        if (seen.has(key)) return false;
+                                        seen.add(key);
+                                        return true;
+                                    });
+                                };
+
+                                const mergedCategories = uniqLower([
+                                    ...(data.categories || []),
+                                    ...(modpack.categories || []),
+                                ]).sort((a, b) => a.localeCompare(b));
+                                const mergedLoaders = uniqLower([
+                                    ...(data.loaders || []),
+                                    ...(modpack.loaders || []),
+                                ]).sort((a, b) => a.localeCompare(b));
+                                const mergedGameVersions = uniqLower([
+                                    ...(data.game_versions || []),
+                                    ...(modpack.gameVersions || []),
+                                ]);
+
                                 setSelectedModpack({
                                     ...modpack,
                                     slug: data.slug,
                                     longDescription: data.body || data.description || modpack.description,
-                                    categories: data.categories || modpack.categories,
-                                    loaders: data.loaders,
-                                    gameVersions: data.game_versions,
+                                    categories: mergedCategories,
+                                    loaders: mergedLoaders,
+                                    gameVersions: mergedGameVersions,
                                     imageUrl: data.icon_url || modpack.imageUrl,
+                                    followers: data.followers ? data.followers.toLocaleString() : modpack.followers,
+                                    updatedAt: data.updated || data.date_modified || modpack.updatedAt,
                                 });
                             } catch (err: any) {
                                 setDetailError(err?.message || 'Failed to load details.');

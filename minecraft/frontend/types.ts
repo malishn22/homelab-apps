@@ -26,6 +26,8 @@ export interface Modpack {
   description: string;
   author: string;
   downloads: string;
+  followers?: string;
+  updatedAt?: string;
   categories: string[];
   imageUrl: string;
   longDescription?: string;

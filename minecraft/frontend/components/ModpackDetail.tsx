@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { Modpack } from '../types';
-import { ArrowLeft, Download, Package, Tag, Server, Users, Sparkles } from 'lucide-react';
+import { ArrowLeft, Download, Package, Tag, Server, Users, Sparkles, Clock } from 'lucide-react';
 
 interface ModpackDetailProps {
     modpack: Modpack;
@@ -14,8 +14,42 @@ interface ModpackDetailProps {
     error?: string | null;
 }
 
+const isGameVersion = (value?: string): boolean => {
+    if (!value) return false;
+    const v = value.trim().toLowerCase();
+    if (v.includes('fabric') || v.includes('forge') || v.includes('loader') || v.includes('quilt')) return false;
+    const release = /^\d+(\.\d+){1,2}([.-](pre|rc)\d+)?$/i;
+    return release.test(v);
+};
+
+const compareVersionsDesc = (a?: string, b?: string): number => {
+    if (!a && !b) return 0;
+    if (!a) return 1;
+    if (!b) return -1;
+    const parse = (v: string) => v.split('.').map((n) => parseInt(n, 10) || 0);
+    const pa = parse(a);
+    const pb = parse(b);
+    const len = Math.max(pa.length, pb.length);
+    for (let i = 0; i < len; i++) {
+        const va = pa[i] ?? 0;
+        const vb = pb[i] ?? 0;
+        if (va !== vb) return vb - va;
+    }
+    return 0;
+};
+
+const formatUpdated = (dateStr?: string): string => {
+    if (!dateStr) return 'N/A';
+    const d = new Date(dateStr);
+    if (Number.isNaN(d.getTime())) return 'N/A';
+    return d.toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+    });
+};
+
 const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstall, loading, error }) => {
-    const mainCategories = modpack.categories?.slice(0, 6) ?? [];
     const sanitizeSchema = {
         ...defaultSchema,
         tagNames: [...(defaultSchema.tagNames || []), 'center', 'iframe'],
@@ -26,6 +60,39 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
             img: [...(defaultSchema.attributes?.img || []), 'loading'],
         },
     };
+
+    const loaderCandidates = [
+        ...(modpack.loaders || []),
+        ...(modpack.categories || []).filter((c) => ['fabric', 'forge', 'quilt', 'neoforge'].includes(c.toLowerCase())),
+    ];
+    const seenLoader = new Set<string>();
+    const loaders = loaderCandidates
+        .filter((l) => {
+            const key = l.toLowerCase();
+            if (seenLoader.has(key)) return false;
+            seenLoader.add(key);
+            return true;
+        })
+        .sort((a, b) => a.localeCompare(b));
+    const fabricLoader = loaders.find((l) => l.toLowerCase() === 'fabric');
+    const primaryLoaderBase = fabricLoader || loaders[0];
+    const isMultiLoader = loaders.length > 1 && !!primaryLoaderBase;
+    const otherLoaders = loaders.filter((l) => l !== primaryLoaderBase);
+
+    const versionCandidates = [
+        ...(modpack.gameVersions || []),
+        ...(modpack.categories || []).filter((c) => isGameVersion(c)),
+    ].filter(isGameVersion);
+    const versions = Array.from(new Set(versionCandidates)).sort(compareVersionsDesc);
+    const latestVersion = versions[0];
+
+    const categoryBadges = (modpack.categories || [])
+        .filter(
+            (cat) =>
+                !['fabric', 'forge', 'quilt', 'neoforge'].includes(cat.toLowerCase()) &&
+                !isGameVersion(cat)
+        )
+        .sort((a, b) => a.localeCompare(b));
 
     return (
         <div className="h-full min-h-0 flex flex-col gap-6 animate-[fadeIn_0.3s_ease-out] overflow-y-auto pb-10">
@@ -63,28 +130,33 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
 
                 <div className="p-6 space-y-6">
                     <div className="flex flex-wrap gap-2">
-                        {mainCategories.map((cat) => (
+                        {isMultiLoader
+                            ? loaders.map((loader) => (
+                                  <span
+                                      key={`loader-${loader}`}
+                                      className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-xs text-primary uppercase tracking-wider"
+                                  >
+                                      <Sparkles size={12} /> {loader}
+                                  </span>
+                              ))
+                            : primaryLoaderBase && (
+                                  <span
+                                      className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-xs text-primary uppercase tracking-wider"
+                                  >
+                                      <Sparkles size={12} /> {primaryLoaderBase}
+                                  </span>
+                              )}
+                        {latestVersion && (
+                            <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-xs text-primary uppercase tracking-wider">
+                                <Tag size={12} /> {latestVersion}
+                            </span>
+                        )}
+                        {categoryBadges.slice(0, 20).map((cat) => (
                             <span
                                 key={cat}
                                 className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs text-text-muted uppercase tracking-wider"
                             >
                                 <Tag size={12} /> {cat}
-                            </span>
-                        ))}
-                        {(modpack.loaders || []).map((loader) => (
-                            <span
-                                key={`loader-${loader}`}
-                                className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-xs text-primary uppercase tracking-wider"
-                            >
-                                <Sparkles size={12} /> {loader}
-                            </span>
-                        ))}
-                        {(modpack.gameVersions || []).slice(0, 4).map((ver) => (
-                            <span
-                                key={`ver-${ver}`}
-                                className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs text-text-muted uppercase tracking-wider"
-                            >
-                                <Tag size={12} /> {ver}
                             </span>
                         ))}
                     </div>
@@ -107,6 +179,30 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                         </div>
                     </div>
 
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="flex items-center gap-2 p-3 rounded-xl bg-white/5 border border-white/10">
+                        <Download size={16} className="text-accent" />
+                        <div>
+                            <div className="text-xs uppercase tracking-wider text-text-dim">Downloads</div>
+                            <div className="text-sm text-white">{modpack.downloads}</div>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2 p-3 rounded-xl bg-white/5 border border-white/10">
+                        <Users size={16} className="text-accent" />
+                        <div>
+                            <div className="text-xs uppercase tracking-wider text-text-dim">Followers</div>
+                            <div className="text-sm text-white">{modpack.followers || 'N/A'}</div>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2 p-3 rounded-xl bg-white/5 border border-white/10">
+                        <Clock size={16} className="text-accent" />
+                        <div>
+                            <div className="text-xs uppercase tracking-wider text-text-dim">Last Updated</div>
+                            <div className="text-sm text-white">{formatUpdated(modpack.updatedAt)}</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

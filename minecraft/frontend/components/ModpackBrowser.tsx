@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Modpack } from '../types';
-import { Search, Download, Sparkles } from 'lucide-react';
+import { fetchTopModpacks, ModrinthModpack } from '../src/api/modpacks';
+import { Search, Download, Sparkles, Users, Clock } from 'lucide-react';
 
 const formatDownloads = (downloads?: number): string => {
     if (typeof downloads !== 'number') return 'N/A';
@@ -9,47 +10,128 @@ const formatDownloads = (downloads?: number): string => {
     return downloads.toString();
 };
 
-const mapApiHitToModpack = (hit: any, idx: number): Modpack => ({
+const formatFollowers = (followers?: number): string => formatDownloads(followers);
+
+const formatUpdated = (dateStr?: string): string => {
+    if (!dateStr) return 'N/A';
+    const d = new Date(dateStr);
+    if (Number.isNaN(d.getTime())) return 'N/A';
+    return d.toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+    });
+};
+
+const isGameVersion = (value?: string): boolean => {
+    if (!value) return false;
+    const v = value.trim().toLowerCase();
+    if (v.includes('fabric') || v.includes('forge') || v.includes('loader') || v.includes('quilt')) return false;
+    const release = /^\d+(\.\d+){1,2}([.-](pre|rc)\d+)?$/i;
+    return release.test(v);
+};
+
+const compareVersionsDesc = (a?: string, b?: string): number => {
+    if (!a && !b) return 0;
+    if (!a) return 1;
+    if (!b) return -1;
+    const parse = (v: string) => v.split('.').map((n) => parseInt(n, 10) || 0);
+    const pa = parse(a);
+    const pb = parse(b);
+    const len = Math.max(pa.length, pb.length);
+    for (let i = 0; i < len; i++) {
+        const va = pa[i] ?? 0;
+        const vb = pb[i] ?? 0;
+        if (va !== vb) return vb - va;
+    }
+    return 0;
+};
+
+const mapApiHitToModpack = (hit: ModrinthModpack, idx: number): Modpack => ({
     id: hit.project_id || hit.slug || `modpack-${idx}`,
+    slug: hit.slug,
     title: hit.title ?? 'Untitled',
     description: hit.description ?? 'No description available.',
-    author: hit.author || hit.author_name || 'Unknown',
+    author: hit.author || 'Unknown',
     downloads: formatDownloads(hit.downloads),
-    categories: hit.categories || hit.loaders || [],
+    followers: formatFollowers(hit.followers),
+    updatedAt: hit.updated || hit.date_modified || hit.date_created,
+    categories: hit.categories || [],
+    gameVersions: hit.game_versions || hit.versions || [],
+    loaders: hit.loaders || [],
     imageUrl: hit.icon_url || `https://api.dicebear.com/7.x/shapes/svg?seed=${hit.slug || idx}`,
 });
+
+const CACHE_TTL_MS = 5 * 60 * 1000;
+let cachedTop: Modpack[] | null = null;
+let cachedAt = 0;
+let cachedPromise: Promise<Modpack[]> | null = null;
+
+const getCachedTop = (): Modpack[] | null => {
+    if (cachedTop && Date.now() - cachedAt < CACHE_TTL_MS) {
+        return cachedTop;
+    }
+    return null;
+};
+
+const fetchTopWithCache = async (limit: number): Promise<Modpack[]> => {
+    const cached = getCachedTop();
+    if (cached) return cached;
+    if (cachedPromise) return cachedPromise;
+
+    cachedPromise = fetchTopModpacks(limit)
+        .then((items) => items.map(mapApiHitToModpack))
+        .then((mapped) => {
+            cachedTop = mapped;
+            cachedAt = Date.now();
+            return mapped;
+        })
+        .finally(() => {
+            cachedPromise = null;
+        });
+
+    return cachedPromise;
+};
 
 interface ModpackBrowserProps {
     onSelect?: (modpack: Modpack) => void;
 }
 
 const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect }) => {
+    const topLimit = 25;
     const [modpacks, setModpacks] = useState<Modpack[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
+        let isMounted = true;
+        const cached = getCachedTop();
+        if (cached) {
+            setModpacks(cached);
+        }
         const fetchTop = async () => {
-            setIsLoading(true);
+            if (!cached) setIsLoading(true);
             setError(null);
             try {
-                const resp = await fetch('/api/modpacks/top?limit=15');
-                if (!resp.ok) {
-                    throw new Error(`API request failed (${resp.status})`);
-                }
-                const data = await resp.json();
-                const items = Array.isArray(data?.items) ? data.items : [];
-                setModpacks(items.map(mapApiHitToModpack));
+                const items = await fetchTopWithCache(topLimit);
+                if (!isMounted) return;
+                setModpacks(items);
             } catch (err: any) {
+                if (!isMounted) return;
                 setError(err?.message || 'Failed to load modpacks.');
             } finally {
-                setIsLoading(false);
+                if (isMounted) {
+                    setIsLoading(false);
+                }
             }
         };
 
         fetchTop();
-    }, []);
+        return () => {
+            isMounted = false;
+        };
+    }, [topLimit]);
 
     const filteredPacks = useMemo(() => {
         const q = searchQuery.toLowerCase();
@@ -69,7 +151,7 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect }) => {
                     <p className="text-text-muted">Live list fetched from your backend.</p>
                 </div>
                 <div className="text-right hidden md:block">
-                    <div className="text-xs text-text-muted uppercase tracking-wider">Showing top 15</div>
+                    <div className="text-xs text-text-muted uppercase tracking-wider">Showing top {topLimit}</div>
                 </div>
             </div>
 
@@ -112,13 +194,95 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect }) => {
                                     <img src={pack.imageUrl} alt={pack.title} className="w-full h-full object-cover" />
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
                                         <h3 className="font-bold text-lg text-white truncate">{pack.title}</h3>
-                                        {pack.categories.slice(0, 2).map((cat) => (
-                                            <span key={cat} className="text-[10px] uppercase tracking-wider px-2 py-0.5 bg-white/5 border border-white/5 rounded text-text-muted">
-                                                {cat}
-                                            </span>
-                                        ))}
+                                        {(() => {
+                                            const loaderCandidates = [
+                                                ...(pack.loaders || []),
+                                                ...(pack.categories || []).filter((c) => ['fabric', 'forge', 'quilt', 'neoforge'].includes(c.toLowerCase())),
+                                            ];
+                                            const seenLoader = new Set<string>();
+                                            const loaders = loaderCandidates.filter((l) => {
+                                                const key = l.toLowerCase();
+                                                if (seenLoader.has(key)) return false;
+                                                seenLoader.add(key);
+                                                return true;
+                                            });
+
+                                            const fabricLoader = loaders.find((l) => l.toLowerCase() === 'fabric');
+                                            const primaryLoaderBase = fabricLoader || loaders[0];
+                                            const isMultiLoader = loaders.length > 1 && !!primaryLoaderBase;
+                                            const primaryLoader = isMultiLoader ? 'MULTI' : primaryLoaderBase;
+                                            const otherLoaders = isMultiLoader
+                                                ? []
+                                                : loaders
+                                                      .filter((l) => l !== primaryLoaderBase)
+                                                      .sort((a, b) => a.localeCompare(b));
+
+                                            const versionCandidates = [
+                                                ...(pack.gameVersions || []),
+                                                ...(pack.categories || []).filter((c) => isGameVersion(c)),
+                                            ].filter(isGameVersion);
+                                            const versions = Array.from(new Set(versionCandidates)).sort(compareVersionsDesc);
+                                            const latestVersion = versions[0];
+
+                                            const primaryBadges = [
+                                                primaryLoader && (
+                                                    <span
+                                                        key={`loader-${pack.id}-${primaryLoader}`}
+                                                        className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border ${
+                                                            isMultiLoader
+                                                                ? 'bg-emerald-500/15 border-emerald-400/30 text-emerald-200'
+                                                                : 'bg-primary/10 border-primary/20 text-primary'
+                                                        }`}
+                                                    >
+                                                        {primaryLoader}
+                                                    </span>
+                                                ),
+                                                latestVersion && (
+                                                    <span
+                                                        key={`ver-${pack.id}-${latestVersion}`}
+                                                        className="text-[10px] uppercase tracking-wider px-2 py-0.5 bg-primary/10 border border-primary/20 rounded text-primary"
+                                                    >
+                                                        {latestVersion}
+                                                    </span>
+                                                ),
+                                            ].filter(Boolean);
+
+                                            const secondaryBadges = [
+                                                ...otherLoaders.map((loader) => (
+                                                    <span
+                                                        key={`loader-${pack.id}-${loader}`}
+                                                        className="text-[10px] uppercase tracking-wider px-2 py-0.5 bg-white/5 border border-white/5 rounded text-text-muted"
+                                                    >
+                                                        {loader}
+                                                    </span>
+                                                )),
+                                                ...pack.categories
+                                                    .filter(
+                                                        (cat) =>
+                                                            !['fabric', 'forge', 'quilt', 'neoforge'].includes(cat.toLowerCase()) &&
+                                                            !isGameVersion(cat)
+                                                    )
+                                                    .sort((a, b) => a.localeCompare(b))
+                                                    .slice(0, 3)
+                                                    .map((cat) => (
+                                                        <span
+                                                            key={cat}
+                                                            className="text-[10px] uppercase tracking-wider px-2 py-0.5 bg-white/5 border border-white/5 rounded text-text-muted"
+                                                        >
+                                                            {cat}
+                                                        </span>
+                                                    )),
+                                            ];
+
+                                            return (
+                                                <>
+                                                    {primaryBadges}
+                                                    {secondaryBadges}
+                                                </>
+                                            );
+                                        })()}
                                     </div>
                                     <p className="text-text-muted text-sm line-clamp-2 mt-1">{pack.description}</p>
                                     <div className="flex items-center gap-4 text-xs text-text-dim mt-2">
@@ -126,6 +290,16 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect }) => {
                                         <span className="flex items-center gap-1 text-accent font-semibold">
                                             <Download size={14} /> {pack.downloads} downloads
                                         </span>
+                                        {pack.followers && (
+                                            <span className="flex items-center gap-1 text-text-muted">
+                                                <Users size={14} /> {pack.followers} followers
+                                            </span>
+                                        )}
+                                        {pack.updatedAt && (
+                                            <span className="flex items-center gap-1 text-text-muted">
+                                                <Clock size={14} /> {formatUpdated(pack.updatedAt)}
+                                            </span>
+                                        )}
                                     </div>
                                 </div>
                             </button>
