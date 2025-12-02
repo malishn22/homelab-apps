@@ -167,5 +167,8 @@ def api_get_modpack_detail(project_id: str) -> dict:
 
 
 if __name__ == "__main__":
-    # Start a dev server with: python apps/minecraft/main.py
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    # Start a dev server with: python apps/minecraft/backend/main.py
+    host = os.environ.get("UVICORN_HOST", "0.0.0.0")
+    port = int(os.environ.get("UVICORN_PORT", "8000"))
+    reload_enabled = os.environ.get("UVICORN_RELOAD", "true").lower() == "true"
+    uvicorn.run(app, host=host, port=port, reload=reload_enabled)
