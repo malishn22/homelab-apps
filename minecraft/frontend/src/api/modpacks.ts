@@ -14,6 +14,7 @@ export type ModrinthModpack = {
   author?: string;
   categories?: string[];
   game_versions?: string[];
+  versions?: string[];
   loaders?: string[];
 };
 
