@@ -33,7 +33,7 @@ USER_AGENT = os.environ.get("MODRINTH_USER_AGENT")
 if not BASE_URL or not USER_AGENT:
     raise RuntimeError(
         "Missing required environment variables: MODRINTH_BASE_URL and "
-        "MODRINTH_USER_AGENT. Set them in apps/minecraft/backend/.env."
+        "MODRINTH_USER_AGENT. Set them in backend/.env"
     )
 
 def search_modrinth(query: str, limit: int = 5):
