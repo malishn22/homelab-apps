@@ -1,4 +1,9 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+
+const buildApiUrl = (path: string) => {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return `${API_BASE_URL}${normalizedPath}`;
+};
 
 export type ModrinthModpack = {
   project_id: string;
@@ -23,11 +28,7 @@ type TopModpacksResponse = {
 };
 
 export async function fetchTopModpacks(limit = 5): Promise<ModrinthModpack[]> {
-  if (!API_BASE_URL) {
-    throw new Error('VITE_API_BASE_URL is not set. Add it to .env.local');
-  }
-
-  const res = await fetch(`${API_BASE_URL}/api/modpacks/top?limit=${limit}`);
+  const res = await fetch(buildApiUrl(`/api/modpacks/top?limit=${limit}`));
   if (!res.ok) {
     throw new Error(`Failed to fetch modpacks: ${res.status}`);
   }
