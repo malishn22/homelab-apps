@@ -1,16 +1,19 @@
 import os
 from pathlib import Path
+from datetime import datetime, timezone
 import requests
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 try:
-    from .modrinth_client import get_top_modpacks, get_modpack_detail
+    from .modrinth_client import get_top_modpacks, get_modpack_detail, get_modpack_versions
+    from .db import init_db, save_modpacks, fetch_modpacks, count_modpacks, get_last_refresh
 except ImportError:  # script execution (python backend/main.py)
     import sys
     sys.path.append(str(Path(__file__).resolve().parent))
-    from modrinth_client import get_top_modpacks, get_modpack_detail
+    from modrinth_client import get_top_modpacks, get_modpack_detail, get_modpack_versions
+    from db import init_db, save_modpacks, fetch_modpacks, count_modpacks, get_last_refresh
 
 
 def load_local_env() -> None:
@@ -41,6 +44,16 @@ if not BASE_URL or not USER_AGENT:
         "Missing required environment variables: MODRINTH_BASE_URL and "
         "MODRINTH_USER_AGENT. Set them in backend/.env"
     )
+
+
+def refresh_modpack_cache(limit: int):
+    """
+    Fetch top modpacks from Modrinth and persist them into the local database.
+    """
+    items = get_top_modpacks(base_url=BASE_URL, user_agent=USER_AGENT, limit=limit)
+    refreshed_at = datetime.now(timezone.utc).isoformat()
+    save_modpacks(items, refreshed_at)
+    return items, refreshed_at
 
 def search_modrinth(query: str, limit: int = 5):
     url = f"{BASE_URL}/search"
@@ -110,16 +123,44 @@ app.add_middleware(
         )
 
 
+@app.on_event("startup")
+def on_startup() -> None:
+    init_db()
+
+
 @app.get("/api/modpacks/top")
 def api_get_top_modpacks(limit: int = Query(5, ge=1, le=50)) -> dict:
     """
-    Return the top Modrinth modpacks by downloads.
+    Return the top modpacks from the cached database, refreshing from Modrinth
+    if the cache is empty.
     """
     try:
-        items = get_top_modpacks(
-            base_url=BASE_URL, user_agent=USER_AGENT, limit=limit
-        )
-        return {"items": items, "count": len(items)}
+        items = fetch_modpacks(limit)
+        refreshed_at = get_last_refresh()
+
+        if not items and count_modpacks() == 0:
+            _, refreshed_at = refresh_modpack_cache(limit)
+            items = fetch_modpacks(limit)
+
+        return {"items": items, "count": len(items), "refreshed_at": refreshed_at}
+    except requests.HTTPError as exc:
+        raise HTTPException(
+            status_code=exc.response.status_code if exc.response else 502,
+            detail=f"Modrinth error: {exc}",
+        ) from exc
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.api_route("/api/modpacks/refresh", methods=["POST", "GET"])
+def api_refresh_modpacks(limit: int = Query(25, ge=1, le=100)) -> dict:
+    """
+    Force-refresh the modpack cache from Modrinth.
+    """
+    try:
+        _, refreshed_at = refresh_modpack_cache(limit)
+        items = fetch_modpacks(limit)
+        return {"items": items, "count": len(items), "refreshed_at": refreshed_at}
     except requests.HTTPError as exc:
         raise HTTPException(
             status_code=exc.response.status_code if exc.response else 502,
@@ -139,6 +180,54 @@ def api_get_modpack_detail(project_id: str) -> dict:
             base_url=BASE_URL, user_agent=USER_AGENT, project_id=project_id
         )
         return data
+    except requests.HTTPError as exc:
+        raise HTTPException(
+            status_code=exc.response.status_code if exc.response else 502,
+            detail=f"Modrinth error: {exc}",
+        ) from exc
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/modpacks/{project_id}/server-files")
+def api_get_modpack_server_files(project_id: str) -> dict:
+    """
+    Check for server-capable version files for a modpack and return available versions.
+    """
+    try:
+        versions = get_modpack_versions(
+            base_url=BASE_URL, user_agent=USER_AGENT, project_id=project_id
+        )
+        server_candidates = []
+        for ver in versions or []:
+            files = ver.get("files", []) or []
+            has_server_file = any(
+                "server" in (f.get("filename", "").lower())
+                or f.get("primary")
+                for f in files
+            )
+            if not has_server_file:
+                continue
+
+            server_candidates.append(
+                {
+                    "id": ver.get("id") or ver.get("version_id"),
+                    "version_number": ver.get("version_number"),
+                    "game_versions": ver.get("game_versions") or [],
+                    "loaders": ver.get("loaders") or [],
+                    "date_published": ver.get("date_published") or ver.get("date_created"),
+                    "files": [
+                        {
+                            "filename": f.get("filename"),
+                            "url": f.get("url"),
+                        }
+                        for f in files
+                        if "server" in (f.get("filename", "").lower()) or f.get("primary")
+                    ],
+                }
+            )
+
+        return {"available": len(server_candidates) > 0, "versions": server_candidates}
     except requests.HTTPError as exc:
         raise HTTPException(
             status_code=exc.response.status_code if exc.response else 502,

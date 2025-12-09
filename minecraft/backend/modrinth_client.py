@@ -28,3 +28,14 @@ def get_modpack_detail(base_url: str, user_agent: str, project_id: str):
     resp = requests.get(url, headers=headers, timeout=10)
     resp.raise_for_status()
     return resp.json()
+
+
+def get_modpack_versions(base_url: str, user_agent: str, project_id: str):
+    """
+    Fetch versions for a modpack (project) from Modrinth.
+    """
+    url = f"{base_url}/project/{project_id}/version"
+    headers = {"User-Agent": user_agent}
+    resp = requests.get(url, headers=headers, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
