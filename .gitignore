@@ -5,6 +5,7 @@
 # Python
 .venv
 __pycache__
+*/backend/modpacks.db
 
 # Frontend
 frontend/node_modules/
