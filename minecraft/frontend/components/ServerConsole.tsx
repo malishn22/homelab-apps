@@ -1,18 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LogEntry, LogLevel, ServerStats } from '../types';
+import { LogLevel } from '../types';
+import type { LogEntry, ServerStats, Server } from '../types';
 import { Square, RefreshCw, Cpu, HardDrive, Terminal, ChevronRight } from 'lucide-react';
 
-const INITIAL_LOGS: LogEntry[] = [
-    { id: '1', timestamp: '14:20:01', level: LogLevel.INFO, message: 'Starting minecraft server version 1.20.4' },
-    { id: '2', timestamp: '14:20:01', level: LogLevel.INFO, message: 'Loading properties' },
-    { id: '3', timestamp: '14:20:02', level: LogLevel.INFO, message: 'Default game type: SURVIVAL' },
-    { id: '4', timestamp: '14:20:02', level: LogLevel.INFO, message: 'Generating keypair' },
-    { id: '5', timestamp: '14:20:03', level: LogLevel.INFO, message: 'Starting Minecraft server on *:25565' },
-    { id: '6', timestamp: '14:20:05', level: LogLevel.WARN, message: "Can't keep up! Is the server overloaded? Running 2005ms or 40 ticks behind" },
-    { id: '7', timestamp: '14:20:05', level: LogLevel.INFO, message: 'Prepared start region for dimension minecraft:overworld' },
-];
+const INITIAL_LOGS: LogEntry[] = [];
 
-const ServerConsole: React.FC = () => {
+interface ServerConsoleProps {
+    server: Server | null;
+}
+
+const ServerConsole: React.FC<ServerConsoleProps> = ({ server }) => {
     const [logs, setLogs] = useState<LogEntry[]>(INITIAL_LOGS);
     const [stats, setStats] = useState<ServerStats>({
         ramUsage: 4.2,
@@ -28,27 +25,17 @@ const ServerConsole: React.FC = () => {
     }, [logs]);
 
     useEffect(() => {
-        const interval = setInterval(() => {
-            setStats(prev => ({
-                ...prev,
-                ramUsage: Math.min(prev.ramTotal, Math.max(2, prev.ramUsage + (Math.random() - 0.5) * 0.5)),
-                cpuLoad: Math.min(100, Math.max(5, prev.cpuLoad + (Math.random() - 0.5) * 5)),
-                tps: Math.min(20, Math.max(15, prev.tps + (Math.random() - 0.5)))
-            }));
-
-            if (Math.random() > 0.7) {
-                const newLog: LogEntry = {
-                    id: Date.now().toString(),
-                    timestamp: new Date().toLocaleTimeString('en-US', { hour12: false }),
-                    level: Math.random() > 0.9 ? LogLevel.WARN : LogLevel.INFO,
-                    message: Math.random() > 0.9 ? 'Player moved too quickly!' : 'Saving chunks for level \'ServerLevel\'...'
-                };
-                setLogs(prev => [...prev, newLog]);
-            }
-        }, 2000);
-
-        return () => clearInterval(interval);
-    }, []);
+        if (!server) {
+            setLogs([]);
+            return;
+        }
+        setLogs([]);
+        setStats((prev) => ({
+            ...prev,
+            ramUsage: Math.min(prev.ramTotal, Math.max(2, prev.ramUsage)),
+            status: server.status === 'MAINTENANCE' ? 'STARTING' : (server.status as any),
+        }));
+    }, [server]);
 
     const getLevelColor = (level: LogLevel) => {
         switch(level) {
@@ -60,15 +47,27 @@ const ServerConsole: React.FC = () => {
         }
     };
 
+    if (!server) {
+        return (
+            <div className="flex flex-col h-full p-6 items-center justify-center text-text-muted">
+                <Terminal className="text-accent mb-3" size={32} />
+                <div className="text-lg text-white">No server selected</div>
+                <div className="text-sm">Pick a server from the Servers tab to view its console.</div>
+            </div>
+        );
+    }
+
     return (
         <div className="flex flex-col h-full p-2">
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h2 className="text-2xl font-bold text-white flex items-center gap-2">
                          <Terminal className="text-accent" size={24} /> 
-                         Live Console
+                         {server ? `${server.name} Console` : 'Live Console'}
                     </h2>
-                    <p className="text-text-muted text-sm">Instance ID: #srv-092-alpha</p>
+                    <p className="text-text-muted text-sm">
+                        {server ? `Instance ID: ${server.id} • Port ${server.port}` : 'Select a server to view console'}
+                    </p>
                 </div>
                 <div className="flex gap-2">
                     <button className="flex items-center gap-2 px-4 py-2 bg-bg-surface hover:bg-bg-hover text-white rounded-lg border border-border-main transition-colors shadow-sm">

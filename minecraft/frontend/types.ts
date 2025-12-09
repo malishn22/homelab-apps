@@ -26,13 +26,33 @@ export interface Modpack {
   description: string;
   author: string;
   downloads: string;
+  downloadsCount?: number;
   followers?: string;
+  followersCount?: number;
   updatedAt?: string;
   categories: string[];
   imageUrl: string;
   longDescription?: string;
   loaders?: string[];
   gameVersions?: string[];
+}
+
+export interface ServerVersionOption {
+  id?: string;
+  versionNumber?: string;
+  gameVersions?: string[];
+  loaders?: string[];
+  datePublished?: string;
+}
+
+export interface InstallRequestOptions {
+  versionId?: string;
+  versionNumber?: string;
+  loaders?: string[];
+  serverId?: string;
+  createNew?: boolean;
+  serverName?: string;
+  serverPort?: number;
 }
 
 export interface ServerStats {

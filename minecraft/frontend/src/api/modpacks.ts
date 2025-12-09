@@ -21,18 +21,58 @@ export type ModrinthModpack = {
   game_versions?: string[];
   versions?: string[];
   loaders?: string[];
+  refreshed_at?: string;
 };
 
-type TopModpacksResponse = {
+export type ServerVersion = {
+  id?: string;
+  version_number?: string;
+  game_versions?: string[];
+  loaders?: string[];
+  date_published?: string;
+  files?: { filename?: string; url?: string }[];
+};
+
+export type ServerFilesResponse = {
+  available: boolean;
+  versions: ServerVersion[];
+};
+
+export type TopModpacksResponse = {
   items?: ModrinthModpack[];
+  count?: number;
+  refreshed_at?: string;
 };
 
-export async function fetchTopModpacks(limit = 5): Promise<ModrinthModpack[]> {
-  const res = await fetch(buildApiUrl(`/api/modpacks/top?limit=${limit}`));
+const parseTopResponse = async (res: Response): Promise<TopModpacksResponse> => {
   if (!res.ok) {
     throw new Error(`Failed to fetch modpacks: ${res.status}`);
   }
 
   const data: TopModpacksResponse = await res.json();
-  return Array.isArray(data.items) ? data.items : [];
+  return data;
+};
+
+export async function fetchTopModpacks(limit = 5): Promise<TopModpacksResponse> {
+  const res = await fetch(buildApiUrl(`/api/modpacks/top?limit=${limit}`));
+  return parseTopResponse(res);
+}
+
+export async function refreshModpacks(limit = 25): Promise<TopModpacksResponse> {
+  const res = await fetch(buildApiUrl(`/api/modpacks/refresh?limit=${limit}`), {
+    method: 'POST',
+  });
+  return parseTopResponse(res);
+}
+
+export async function fetchServerFiles(projectId: string): Promise<ServerFilesResponse> {
+  const res = await fetch(buildApiUrl(`/api/modpacks/${projectId}/server-files`));
+  if (!res.ok) {
+    throw new Error(`Failed to fetch server files: ${res.status}`);
+  }
+  const data = await res.json();
+  return {
+    available: Boolean(data?.available),
+    versions: Array.isArray(data?.versions) ? data.versions : [],
+  };
 }
