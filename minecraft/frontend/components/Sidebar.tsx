@@ -24,8 +24,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) => {
                     <Zap className="text-white fill-white" size={20} />
                 </div>
                 <div>
-                    <span className="text-lg font-bold tracking-tight text-white block leading-none">Vortex</span>
-                    <span className="text-xs text-text-muted font-medium tracking-wide">MANAGER</span>
+                    <span className="text-lg font-bold tracking-tight text-white block leading-none">Mali</span>
+                    <span className="text-xs text-text-muted font-medium tracking-wide">MINECRAFT</span>
                 </div>
             </div>
 
@@ -38,10 +38,10 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) => {
                         </div>
                     </div>
                     <div className="flex-1 min-w-0">
-                        <div className="text-sm font-semibold truncate group-hover:text-primary transition-colors">Admin User</div>
+                        <div className="text-sm font-semibold truncate group-hover:text-primary transition-colors">Mali User</div>
                         <div className="text-xs text-text-muted flex items-center gap-1">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                            Pro Plan
+                            No Plan
                         </div>
                     </div>
                 </div>
