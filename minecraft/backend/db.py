@@ -47,6 +47,8 @@ def init_db() -> None:
                 game_versions JSONB DEFAULT '[]'::jsonb,
                 versions JSONB DEFAULT '[]'::jsonb,
                 loaders JSONB DEFAULT '[]'::jsonb,
+                server_side TEXT,
+                server_versions JSONB DEFAULT '[]'::jsonb,
                 refreshed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
             """
@@ -54,6 +56,18 @@ def init_db() -> None:
         cur.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_modpacks_downloads ON modpacks (downloads DESC);
+            """
+        )
+        cur.execute(
+            """
+            ALTER TABLE modpacks
+            ADD COLUMN IF NOT EXISTS server_side TEXT;
+            """
+        )
+        cur.execute(
+            """
+            ALTER TABLE modpacks
+            ADD COLUMN IF NOT EXISTS server_versions JSONB DEFAULT '[]'::jsonb;
             """
         )
 
@@ -87,6 +101,8 @@ def save_modpacks(modpacks: Iterable[Dict[str, Any]], refreshed_at: str) -> int:
                 Json(_coerce_list(item.get("game_versions"))),
                 Json(_coerce_list(item.get("versions"))),
                 Json(_coerce_list(item.get("loaders"))),
+                item.get("server_side"),
+                Json(item.get("server_versions") or []),
                 refreshed_at,
             )
         )
@@ -100,9 +116,9 @@ def save_modpacks(modpacks: Iterable[Dict[str, Any]], refreshed_at: str) -> int:
             INSERT INTO modpacks (
                 project_id, slug, title, icon_url, downloads, followers,
                 updated, date_modified, date_created, description, author,
-                categories, game_versions, versions, loaders, refreshed_at
+                categories, game_versions, versions, loaders, server_side, server_versions, refreshed_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (project_id) DO UPDATE SET
                 slug = EXCLUDED.slug,
                 title = EXCLUDED.title,
@@ -118,6 +134,8 @@ def save_modpacks(modpacks: Iterable[Dict[str, Any]], refreshed_at: str) -> int:
                 game_versions = EXCLUDED.game_versions,
                 versions = EXCLUDED.versions,
                 loaders = EXCLUDED.loaders,
+                server_side = EXCLUDED.server_side,
+                server_versions = EXCLUDED.server_versions,
                 refreshed_at = EXCLUDED.refreshed_at;
             """,
             rows,
@@ -132,7 +150,7 @@ def fetch_modpacks(limit: int) -> List[Dict[str, Any]]:
             SELECT
                 project_id, slug, title, icon_url, downloads, followers,
                 updated, date_modified, date_created, description, author,
-                categories, game_versions, versions, loaders, refreshed_at
+                categories, game_versions, versions, loaders, server_side, server_versions, refreshed_at
             FROM modpacks
             ORDER BY downloads DESC NULLS LAST, title ASC
             LIMIT %s;
@@ -161,6 +179,8 @@ def fetch_modpacks(limit: int) -> List[Dict[str, Any]]:
                 "game_versions": row.get("game_versions") or [],
                 "versions": row.get("versions") or [],
                 "loaders": row.get("loaders") or [],
+                "server_side": row.get("server_side"),
+                "server_versions": row.get("server_versions") or [],
                 "refreshed_at": refreshed_at_value.isoformat() if refreshed_at_value else None,
             }
         )
@@ -183,3 +203,41 @@ def get_last_refresh() -> Optional[str]:
     if refreshed_at_value:
         return refreshed_at_value.isoformat()
     return None
+
+
+def fetch_modpack_by_id(project_id: str) -> Optional[Dict[str, Any]]:
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                project_id, slug, title, icon_url, downloads, followers,
+                updated, date_modified, date_created, description, author,
+                categories, game_versions, versions, loaders, server_versions, refreshed_at
+            FROM modpacks
+            WHERE project_id = %s;
+            """,
+            (project_id,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    refreshed_at_value = row.get("refreshed_at")
+    return {
+        "project_id": row.get("project_id"),
+        "slug": row.get("slug"),
+        "title": row.get("title"),
+        "icon_url": row.get("icon_url"),
+        "downloads": row.get("downloads"),
+        "followers": row.get("followers"),
+        "updated": row.get("updated"),
+        "date_modified": row.get("date_modified"),
+        "date_created": row.get("date_created"),
+        "description": row.get("description"),
+        "author": row.get("author"),
+        "categories": row.get("categories") or [],
+        "game_versions": row.get("game_versions") or [],
+        "versions": row.get("versions") or [],
+        "loaders": row.get("loaders") or [],
+        "server_versions": row.get("server_versions") or [],
+        "refreshed_at": refreshed_at_value.isoformat() if refreshed_at_value else None,
+    }
