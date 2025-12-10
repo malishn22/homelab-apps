@@ -35,6 +35,7 @@ export interface Modpack {
   longDescription?: string;
   loaders?: string[];
   gameVersions?: string[];
+  serverSide?: string;
 }
 
 export interface ServerVersionOption {
@@ -43,6 +44,7 @@ export interface ServerVersionOption {
   gameVersions?: string[];
   loaders?: string[];
   datePublished?: string;
+  serverSupported?: boolean;
 }
 
 export interface InstallRequestOptions {
@@ -60,7 +62,7 @@ export interface ServerStats {
   ramTotal: number; // in GB
   cpuLoad: number; // percentage
   tps: number; // ticks per second
-  status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'STOPPING';
+  status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'STOPPING' | 'MAINTENANCE';
 }
 
 export interface Server {

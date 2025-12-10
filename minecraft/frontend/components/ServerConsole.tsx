@@ -3,39 +3,57 @@ import { LogLevel } from '../types';
 import type { LogEntry, ServerStats, Server } from '../types';
 import { Square, RefreshCw, Cpu, HardDrive, Terminal, ChevronRight } from 'lucide-react';
 
-const INITIAL_LOGS: LogEntry[] = [];
-
 interface ServerConsoleProps {
     server: Server | null;
+    logs?: LogEntry[];
+    stats?: ServerStats;
+    onStart?: () => void;
+    onStop?: () => void;
+    onSendCommand?: (command: string) => void;
 }
 
-const ServerConsole: React.FC<ServerConsoleProps> = ({ server }) => {
-    const [logs, setLogs] = useState<LogEntry[]>(INITIAL_LOGS);
-    const [stats, setStats] = useState<ServerStats>({
-        ramUsage: 4.2,
-        ramTotal: 8,
-        cpuLoad: 12,
-        tps: 20,
-        status: 'ONLINE'
-    });
+const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats, onStart, onStop, onSendCommand }) => {
     const consoleEndRef = useRef<HTMLDivElement>(null);
+    const [command, setCommand] = useState('');
+    const effectiveStats: ServerStats = stats || {
+        ramUsage: server?.ramUsage ?? 0,
+        ramTotal: server?.ramLimit ?? 0,
+        cpuLoad: 0,
+        tps: 0,
+        status: (server?.status as ServerStats['status']) || 'OFFLINE',
+    };
 
     useEffect(() => {
         consoleEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [logs]);
+    }, [logs.length, server?.id]);
 
-    useEffect(() => {
-        if (!server) {
-            setLogs([]);
-            return;
-        }
-        setLogs([]);
-        setStats((prev) => ({
-            ...prev,
-            ramUsage: Math.min(prev.ramTotal, Math.max(2, prev.ramUsage)),
-            status: server.status === 'MAINTENANCE' ? 'STARTING' : (server.status as any),
-        }));
-    }, [server]);
+    const isOnline = server?.status === 'ONLINE';
+    const isStarting = server?.status === 'STARTING';
+    const ramPercent = effectiveStats.ramTotal > 0 ? Math.min(100, (effectiveStats.ramUsage / effectiveStats.ramTotal) * 100) : 0;
+    const statusColor =
+        effectiveStats.status === 'ONLINE'
+            ? 'text-emerald-400'
+            : effectiveStats.status === 'STARTING'
+            ? 'text-yellow-300'
+            : effectiveStats.status === 'MAINTENANCE'
+            ? 'text-red-400'
+            : 'text-text-muted';
+    const statusDotClass =
+        effectiveStats.status === 'ONLINE'
+            ? 'bg-emerald-500'
+            : effectiveStats.status === 'STARTING'
+            ? 'bg-yellow-400'
+            : effectiveStats.status === 'MAINTENANCE'
+            ? 'bg-red-500'
+            : 'bg-zinc-500';
+
+    const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        const value = command.trim();
+        if (!value) return;
+        onSendCommand?.(value);
+        setCommand('');
+    };
 
     const getLevelColor = (level: LogLevel) => {
         switch(level) {
@@ -70,10 +88,18 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server }) => {
                     </p>
                 </div>
                 <div className="flex gap-2">
-                    <button className="flex items-center gap-2 px-4 py-2 bg-bg-surface hover:bg-bg-hover text-white rounded-lg border border-border-main transition-colors shadow-sm">
-                        <RefreshCw size={16} /> <span className="hidden sm:inline">Restart</span>
+                    <button
+                        onClick={() => onStart?.()}
+                        disabled={!server || isStarting}
+                        className="flex items-center gap-2 px-4 py-2 bg-bg-surface hover:bg-bg-hover text-white rounded-lg border border-border-main transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                        <RefreshCw size={16} /> <span className="hidden sm:inline">{isOnline ? 'Restart' : 'Start'}</span>
                     </button>
-                    <button className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-lg border border-red-500/20 transition-colors shadow-sm shadow-red-900/10">
+                    <button
+                        onClick={() => onStop?.()}
+                        disabled={!server || (!isOnline && !isStarting)}
+                        className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-lg border border-red-500/20 transition-colors shadow-sm shadow-red-900/10 disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
                         <Square size={16} fill="currentColor" /> <span className="hidden sm:inline">Stop</span>
                     </button>
                 </div>
@@ -89,13 +115,13 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server }) => {
                             <HardDrive size={14} /> RAM Usage
                         </div>
                         <div className="flex items-baseline gap-2">
-                            <span className="text-3xl font-bold text-white">{stats.ramUsage.toFixed(1)}</span>
-                            <span className="text-sm text-text-muted">/ {stats.ramTotal} GB</span>
+                            <span className="text-3xl font-bold text-white">{effectiveStats.ramUsage.toFixed(1)}</span>
+                            <span className="text-sm text-text-muted">/ {effectiveStats.ramTotal} GB</span>
                         </div>
                         <div className="w-full bg-bg-body/50 h-1.5 mt-4 rounded-full overflow-hidden">
                             <div 
                                 className="h-full bg-gradient-to-r from-primary to-purple-400 transition-all duration-500 shadow-[0_0_10px_rgba(139,92,246,0.5)]" 
-                                style={{ width: `${(stats.ramUsage / stats.ramTotal) * 100}%` }}
+                                style={{ width: `${ramPercent}%` }}
                             ></div>
                         </div>
                     </div>
@@ -109,13 +135,13 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server }) => {
                             <Cpu size={14} /> CPU Load
                         </div>
                         <div className="flex items-baseline gap-2">
-                            <span className="text-3xl font-bold text-white">{stats.cpuLoad.toFixed(0)}</span>
+                            <span className="text-3xl font-bold text-white">{effectiveStats.cpuLoad.toFixed(0)}</span>
                             <span className="text-sm text-text-muted">%</span>
                         </div>
                         <div className="w-full bg-bg-body/50 h-1.5 mt-4 rounded-full overflow-hidden">
                             <div 
                                 className="h-full bg-gradient-to-r from-accent to-blue-400 transition-all duration-500 shadow-[0_0_10px_rgba(6,182,212,0.5)]" 
-                                style={{ width: `${stats.cpuLoad}%` }}
+                                style={{ width: `${effectiveStats.cpuLoad}%` }}
                             ></div>
                         </div>
                     </div>
@@ -126,17 +152,17 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server }) => {
                     <div className="flex justify-between items-center">
                         <div>
                              <div className="text-text-muted text-xs font-bold uppercase tracking-wider mb-1">Status</div>
-                             <div className="text-xl font-bold text-emerald-400 flex items-center gap-2">
+                             <div className={`text-xl font-bold flex items-center gap-2 ${statusColor}`}>
                                 <span className="relative flex h-2.5 w-2.5">
-                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${statusDotClass}`}></span>
+                                  <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${statusDotClass}`}></span>
                                 </span>
-                                {stats.status}
+                                {effectiveStats.status}
                             </div>
                         </div>
                         <div className="text-right">
                             <div className="text-text-muted text-xs font-bold uppercase tracking-wider mb-1">TPS</div>
-                            <div className="text-xl font-bold text-white">{stats.tps.toFixed(1)}</div>
+                            <div className="text-xl font-bold text-white">{effectiveStats.tps.toFixed(1)}</div>
                         </div>
                     </div>
                 </div>
@@ -173,14 +199,17 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server }) => {
             </div>
 
             {/* Input Line */}
-            <div className="mt-4 relative">
+            <form className="mt-4 relative" onSubmit={handleSubmit}>
                 <ChevronRight className="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted" size={18} />
                 <input 
                     type="text" 
-                    placeholder="Enter command..." 
-                    className="w-full bg-glass border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white font-mono text-sm focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all placeholder:text-text-dim"
+                    placeholder={server ? 'Enter command...' : 'Start a server to send commands'}
+                    value={command}
+                    disabled={!server}
+                    onChange={(e) => setCommand(e.target.value)}
+                    className="w-full bg-glass border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white font-mono text-sm focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all placeholder:text-text-dim disabled:opacity-60 disabled:cursor-not-allowed"
                 />
-            </div>
+            </form>
         </div>
     );
 };

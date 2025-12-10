@@ -1,4 +1,79 @@
-/* Placeholder stylesheet to satisfy index.css request; real styles come from components/tailwind. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+
+/* Glassmorphism Utilities */
+.glass-panel {
+  background: rgba(24, 24, 27, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.glass-panel-hover:hover {
+  background: rgba(39, 39, 42, 0.8);
+  border-color: rgba(139, 92, 246, 0.3);
+  box-shadow: 0 0 15px rgba(139, 92, 246, 0.1);
+}
+
+/* Markdown body styling */
+.markdown-body {
+  color: #d4d4d8;
+  font-size: 15px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+.markdown-body p {
+  margin: 0 0 0.9rem;
+}
+.markdown-body ul,
+.markdown-body ol {
+  margin: 0 0 0.9rem 1.4rem;
+  list-style: disc;
+}
+.markdown-body a {
+  color: #c4b5fd;
+  text-decoration: underline;
+}
+.markdown-body strong {
+  color: #e4e4e7;
+}
+.markdown-body img {
+  max-width: 100%;
+  border-radius: 10px;
+  margin: 0.6rem 0;
+}
+.markdown-body code {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.15rem 0.35rem;
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.markdown-body blockquote {
+  border-left: 3px solid rgba(255, 255, 255, 0.1);
+  padding-left: 0.9rem;
+  color: #a1a1aa;
+  margin: 0 0 1rem;
+}
+
 body {
   margin: 0;
+  background-color: #09090b;
+  color: #f4f4f5;
 }

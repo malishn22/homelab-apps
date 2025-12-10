@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modpack } from '../types';
 import { fetchTopModpacks, ModrinthModpack, refreshModpacks } from '../src/api/modpacks';
-import { Search, Download, Sparkles, Users, Clock, RefreshCcw } from 'lucide-react';
+import { Search, Download, Sparkles, Users, Clock, RefreshCcw, ServerCrash, Server as ServerIcon, ChevronLeft, ChevronRight } from 'lucide-react';
 
 const formatDownloads = (downloads?: number): string => {
     if (typeof downloads !== 'number') return 'N/A';
@@ -73,7 +73,15 @@ const formatRefreshedAt = (value?: string | null): string => {
     if (!value) return '';
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return '';
-    return date.toLocaleString();
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const minutes = Math.floor(diffMs / (1000 * 60));
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+    const days = Math.floor(hours / 24);
+    return `${days} day${days === 1 ? '' : 's'} ago`;
 };
 
 const mapApiHitToModpack = (hit: ModrinthModpack, idx: number): Modpack => ({
@@ -90,6 +98,7 @@ const mapApiHitToModpack = (hit: ModrinthModpack, idx: number): Modpack => ({
     categories: hit.categories || [],
     gameVersions: hit.game_versions || hit.versions || [],
     loaders: hit.loaders || [],
+    serverSide: (hit.server_side || '').toLowerCase() || 'unsupported',
     imageUrl: hit.icon_url || `https://api.dicebear.com/7.x/shapes/svg?seed=${hit.slug || idx}`,
 });
 
@@ -104,7 +113,7 @@ interface ModpackBrowserProps {
 type SortMode = 'downloads' | 'updated' | 'title-asc' | 'title-desc';
 
 const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifications }) => {
-    const topLimit = 25;
+    const topLimit = 100;
     const [modpacks, setModpacks] = useState<Modpack[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -112,6 +121,9 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
     const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [sortMode, setSortMode] = useState<SortMode>('downloads');
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(20);
+    const [serverFilter, setServerFilter] = useState<'all' | 'server' | 'client'>('all');
 
     const loadTopModpacks = useCallback(async () => {
         const response = await fetchTopModpacks(topLimit);
@@ -155,6 +167,7 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
             const mapped = mapModrinthToModpacks(items);
             setModpacks(mapped);
             setLastRefreshed(resp.refreshed_at ?? new Date().toISOString());
+            setPage(1);
 
             if (onAddNotifications) {
                 const updatedMods = mapped.filter((p) => {
@@ -172,11 +185,25 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
         }
     };
 
+    useEffect(() => {
+        setPage(1);
+    }, [searchQuery, sortMode, modpacks.length, pageSize, serverFilter]);
+
     const filteredPacks = useMemo(() => {
         const q = searchQuery.toLowerCase();
-        const filtered = modpacks.filter((pack) =>
-            pack.title.toLowerCase().includes(q) || pack.description.toLowerCase().includes(q)
-        );
+        const filtered = modpacks.filter((pack) => {
+            const matchesText =
+                pack.title.toLowerCase().includes(q) || pack.description.toLowerCase().includes(q);
+            if (!matchesText) return false;
+            const serverSide = (pack.serverSide || '').toLowerCase() || 'unsupported';
+            if (serverFilter === 'server') {
+                return serverSide !== 'unsupported';
+            }
+            if (serverFilter === 'client') {
+                return serverSide === 'unsupported';
+            }
+            return true;
+        });
 
         const sorted = [...filtered].sort((a, b) => {
             switch (sortMode) {
@@ -202,7 +229,23 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
         });
 
         return sorted;
-    }, [modpacks, searchQuery, sortMode]);
+    }, [modpacks, searchQuery, sortMode, serverFilter]);
+
+    const totalPages = useMemo(() => {
+        const total = Math.ceil(filteredPacks.length / pageSize);
+        return total > 0 ? total : 1;
+    }, [filteredPacks.length, pageSize]);
+
+    useEffect(() => {
+        if (page > totalPages) {
+            setPage(totalPages);
+        }
+    }, [page, totalPages]);
+
+    const pagedPacks = useMemo(() => {
+        const start = (page - 1) * pageSize;
+        return filteredPacks.slice(start, start + pageSize);
+    }, [filteredPacks, page, pageSize]);
 
     return (
         <div className="h-full flex flex-col p-2">
@@ -246,19 +289,34 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
 
                         {!isLoading && (
                             <div className="space-y-4">
-                                {filteredPacks.map((pack, idx) => (
+                                {pagedPacks.map((pack, idx) => (
                                     <button
                                         key={pack.id}
                                         onClick={() => onSelect?.(pack)}
                                         className="w-full text-left glass-panel p-4 rounded-2xl flex items-center gap-4 glass-panel-hover transition-all hover:border-primary/40 hover:shadow-primary/20"
                                     >
-                                        <div className="text-2xl font-bold text-primary w-10 text-center">{idx + 1}</div>
+                                        <div className="text-2xl font-bold text-primary w-10 text-center">
+                                            {(page - 1) * pageSize + idx + 1}
+                                        </div>
                                         <div className="w-20 h-14 rounded-xl overflow-hidden bg-bg-surface border border-border-main/70 shrink-0">
                                             <img src={pack.imageUrl} alt={pack.title} className="w-full h-full object-cover" />
                                         </div>
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2 flex-wrap">
-                                                <h3 className="font-bold text-lg text-white truncate">{pack.title}</h3>
+                                                <h3 className="font-bold text-lg text-white truncate flex items-center gap-2">
+                                                    {pack.title}
+                                                    {pack.serverSide ? (
+                                                        (pack.serverSide || '').toLowerCase() === 'unsupported' ? (
+                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/10 text-red-300 border border-red-500/30 text-[10px] uppercase tracking-wide">
+                                                                <ServerCrash size={12} /> Client only
+                                                            </span>
+                                                        ) : (
+                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 text-[10px] uppercase tracking-wide">
+                                                                <ServerIcon size={12} /> Server Exist
+                                                            </span>
+                                                        )
+                                                    ) : null}
+                                                </h3>
                                                 {(() => {
                                                     const loaderCandidates = [
                                                         ...(pack.loaders || []),
@@ -295,7 +353,7 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
                                                                 key={`loader-${pack.id}-${primaryLoader}`}
                                                                 className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border ${
                                                                     isMultiLoader
-                                                                        ? 'bg-emerald-500/15 border-emerald-400/30 text-emerald-200'
+                                                                        ? 'bg-blue-500/15 border-blue-400/30 text-blue-200'
                                                                         : 'bg-primary/10 border-primary/20 text-primary'
                                                                 }`}
                                                             >
@@ -411,6 +469,58 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
                                             {opt.label}
                                         </button>
                                     ))}
+                                </div>
+                            </div>
+
+                            <div className="space-y-3">
+                                <div className="text-xs uppercase tracking-wide text-text-dim">Filters</div>
+                                <div className="flex flex-wrap gap-2">
+                                    <select
+                                        value={serverFilter}
+                                        onChange={(e) => {
+                                            setServerFilter(e.target.value as any);
+                                            setPage(1);
+                                        }}
+                                        className="bg-bg-surface/60 border border-border-main rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                                    >
+                                        <option value="all">All</option>
+                                        <option value="server">Server Exist</option>
+                                        <option value="client">Client only</option>
+                                    </select>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs text-text-dim">View:</span>
+                                        <select
+                                            value={pageSize}
+                                            onChange={(e) => {
+                                                setPageSize(parseInt(e.target.value, 10) || 10);
+                                                setPage(1);
+                                            }}
+                                            className="bg-bg-surface/60 border border-border-main rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                                        >
+                                            {[10, 20, 50, 100].map((size) => (
+                                                <option key={size} value={size}>{size}</option>
+                                            ))}
+                                        </select>
+                                        <div className="flex items-center gap-2 ml-auto">
+                                            <button
+                                                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                                                disabled={page <= 1}
+                                                className="p-2 rounded-lg border border-border-main bg-bg-surface/60 text-text-muted hover:text-white hover:border-primary/40 transition disabled:opacity-50"
+                                            >
+                                                <ChevronLeft size={16} />
+                                            </button>
+                                            <div className="text-sm text-white px-3 py-1 rounded-lg bg-white/5 border border-border-main">
+                                                {page} / {totalPages}
+                                            </div>
+                                            <button
+                                                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                                                disabled={page >= totalPages}
+                                                className="p-2 rounded-lg border border-border-main bg-bg-surface/60 text-text-muted hover:text-white hover:border-primary/40 transition disabled:opacity-50"
+                                            >
+                                                <ChevronRight size={16} />
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>

@@ -22,6 +22,7 @@ export type ModrinthModpack = {
   versions?: string[];
   loaders?: string[];
   refreshed_at?: string;
+  server_side?: string;
 };
 
 export type ServerVersion = {
@@ -31,6 +32,7 @@ export type ServerVersion = {
   loaders?: string[];
   date_published?: string;
   files?: { filename?: string; url?: string }[];
+  server_supported?: boolean;
 };
 
 export type ServerFilesResponse = {

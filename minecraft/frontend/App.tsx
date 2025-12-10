@@ -4,9 +4,18 @@ import ModpackBrowser from './components/ModpackBrowser';
 import ModpackDetail from './components/ModpackDetail';
 import ServerConsole from './components/ServerConsole';
 import ServerList from './components/ServerList';
-import { View } from './types';
-import type { Modpack, Server, InstallRequestOptions } from './types';
+import { LogLevel, View } from './types';
+import type { InstallRequestOptions, LogEntry, Modpack, Server, ServerStats } from './types';
 import { Bell, HelpCircle, Construction } from 'lucide-react';
+import {
+    listServers as apiListServers,
+    createServer as apiCreateServer,
+    startServer as apiStartServer,
+    stopServer as apiStopServer,
+    fetchLogs as apiFetchLogs,
+    fetchStatus as apiFetchStatus,
+    sendCommand as apiSendCommand,
+} from './src/api/servers';
 
 type NotificationItem = {
     id: string;
@@ -24,11 +33,45 @@ const App: React.FC = () => {
     const [showNotifications, setShowNotifications] = useState(false);
     const [servers, setServers] = useState<Server[]>([]);
     const [activeServerId, setActiveServerId] = useState<string | null>(null);
+    const [serverLogs, setServerLogs] = useState<Record<string, LogEntry[]>>({});
+    const [serverStats, setServerStats] = useState<Record<string, ServerStats>>({});
+    const logIntervalsRef = useRef<Record<string, number>>({});
+    const statIntervalsRef = useRef<Record<string, number>>({});
+    const startupTimersRef = useRef<Record<string, number>>({});
     const notificationsRef = useRef<HTMLDivElement | null>(null);
+
+    const mapInstanceToServer = (instance: any): Server => ({
+        id: instance.id,
+        name: instance.name,
+        type: instance.loader || 'Modpack',
+        version: instance.version_number || 'latest',
+        port: instance.port,
+        status: (instance.status as Server['status']) || 'OFFLINE',
+        players: 0,
+        maxPlayers: 20,
+        ramUsage: 0,
+        ramLimit: instance.ram_gb || 4,
+    });
+
+    useEffect(() => {
+        const bootstrap = async () => {
+            try {
+                const items = await apiListServers();
+                const mapped = items.map(mapInstanceToServer);
+                setServers(mapped);
+                mapped.forEach(ensureServerStats);
+            } catch (err) {
+                console.error('Failed to fetch servers', err);
+            }
+        };
+        bootstrap();
+    }, []);
 
     const handleServerSelect = (serverId: string) => {
         setActiveServerId(serverId);
         setCurrentView(View.DASHBOARD);
+        const selected = servers.find((s) => s.id === serverId);
+        if (selected) ensureServerStats(selected);
     };
 
     useEffect(() => {
@@ -42,6 +85,197 @@ const App: React.FC = () => {
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [showNotifications]);
+
+    const appendLog = (serverId: string, message: string, level: LogLevel = LogLevel.INFO) => {
+        setServerLogs((prev) => {
+            const now = new Date();
+            const nextEntry: LogEntry = {
+                id: `${serverId}-${now.getTime()}-${Math.random().toString(36).slice(2, 6)}`,
+                timestamp: now.toLocaleTimeString(),
+                level,
+                message,
+            };
+            const existing = prev[serverId] || [];
+            const merged = [...existing, nextEntry].slice(-400);
+            return { ...prev, [serverId]: merged };
+        });
+    };
+
+    const clearServerTimers = (serverId: string) => {
+        if (logIntervalsRef.current[serverId]) {
+            clearInterval(logIntervalsRef.current[serverId]);
+            delete logIntervalsRef.current[serverId];
+        }
+        if (statIntervalsRef.current[serverId]) {
+            clearInterval(statIntervalsRef.current[serverId]);
+            delete statIntervalsRef.current[serverId];
+        }
+        if (startupTimersRef.current[serverId]) {
+            clearTimeout(startupTimersRef.current[serverId]);
+            delete startupTimersRef.current[serverId];
+        }
+    };
+
+    const ensureServerStats = (server: Server) => {
+        setServerStats((prev) => {
+            if (prev[server.id]) return prev;
+            return {
+                ...prev,
+                [server.id]: {
+                    ramUsage: 0,
+                    ramTotal: server.ramLimit,
+                    cpuLoad: 0,
+                    tps: 0,
+                    status: server.status as ServerStats['status'],
+                },
+            };
+        });
+    };
+
+    const fetchAndUpdateStatus = async (serverId: string) => {
+        try {
+            const data = await apiFetchStatus(serverId);
+            const status = (data.status as Server['status']) || 'OFFLINE';
+            const stats = data.stats;
+            setServers((prev) =>
+                prev.map((srv) =>
+                    srv.id === serverId
+                        ? {
+                              ...srv,
+                              status,
+                              ramUsage: typeof stats?.ramUsage === 'number' ? stats.ramUsage : srv.ramUsage,
+                              ramLimit: srv.ramLimit,
+                          }
+                        : srv
+                )
+            );
+            if (stats) {
+                setServerStats((prev) => ({
+                    ...prev,
+                    [serverId]: {
+                        ramUsage: stats.ramUsage ?? prev[serverId]?.ramUsage ?? 0,
+                        ramTotal: stats.ramTotal ?? prev[serverId]?.ramTotal ?? 0,
+                        cpuLoad: stats.cpuLoad ?? prev[serverId]?.cpuLoad ?? 0,
+                        tps: stats.tps ?? prev[serverId]?.tps ?? 0,
+                        status,
+                    },
+                }));
+            }
+        } catch (err) {
+            console.error('Failed to fetch status', err);
+        }
+    };
+
+    const fetchAndUpdateLogs = async (serverId: string) => {
+        try {
+            const lines = await apiFetchLogs(serverId, 200);
+            const mapped: LogEntry[] = lines.map((line, idx) => ({
+                id: `${serverId}-${idx}-${line.slice(0, 8)}`,
+                timestamp: new Date().toLocaleTimeString(),
+                level: LogLevel.INFO,
+                message: line,
+            }));
+            setServerLogs((prev) => ({ ...prev, [serverId]: mapped.slice(-400) }));
+        } catch (err) {
+            console.error('Failed to fetch logs', err);
+        }
+    };
+
+    const startServer = async (serverId: string) => {
+        const server = servers.find((s) => s.id === serverId);
+        if (!server) return;
+        ensureServerStats(server);
+        clearServerTimers(serverId);
+        setServers((prev) =>
+            prev.map((srv) => (srv.id === serverId ? { ...srv, status: 'STARTING' } : srv))
+        );
+        appendLog(serverId, 'Starting server container via backend…', LogLevel.INFO);
+        try {
+            await apiStartServer(serverId);
+            appendLog(serverId, 'Start request sent. Polling status…', LogLevel.INFO);
+            fetchAndUpdateStatus(serverId);
+            fetchAndUpdateLogs(serverId);
+            statIntervalsRef.current[serverId] = window.setInterval(
+                () => fetchAndUpdateStatus(serverId),
+                5000
+            );
+            logIntervalsRef.current[serverId] = window.setInterval(
+                () => fetchAndUpdateLogs(serverId),
+                4000
+            );
+        } catch (err: any) {
+            appendLog(serverId, `Failed to start: ${err?.message || err}`, LogLevel.ERROR);
+            setServers((prev) =>
+                prev.map((srv) => (srv.id === serverId ? { ...srv, status: 'OFFLINE' } : srv))
+            );
+        }
+    };
+
+    const stopServer = async (serverId: string) => {
+        const server = servers.find((s) => s.id === serverId);
+        if (!server) return;
+        clearServerTimers(serverId);
+        appendLog(serverId, 'Stop requested. Flushing world save…', LogLevel.WARN);
+        try {
+            await apiStopServer(serverId);
+            setServers((prev) =>
+                prev.map((srv) =>
+                    srv.id === serverId ? { ...srv, status: 'OFFLINE', players: 0, ramUsage: 0 } : srv
+                )
+            );
+            setServerStats((prev) => {
+                const current = prev[serverId];
+                return {
+                    ...prev,
+                    [serverId]: {
+                        ...(current || {}),
+                        ramUsage: 0,
+                        ramTotal: server.ramLimit,
+                        cpuLoad: 0,
+                        tps: 0,
+                        status: 'OFFLINE',
+                    },
+                };
+            });
+            appendLog(serverId, 'Server stopped.', LogLevel.INFO);
+        } catch (err: any) {
+            appendLog(serverId, `Failed to stop: ${err?.message || err}`, LogLevel.ERROR);
+        }
+    };
+
+    const handleSendCommand = (serverId: string, command: string) => {
+        const trimmed = command.trim();
+        if (!trimmed) return;
+        appendLog(serverId, `> ${trimmed}`, LogLevel.INFO);
+        apiSendCommand(serverId, trimmed).catch((err) =>
+            appendLog(serverId, `Failed to send: ${err?.message || err}`, LogLevel.ERROR)
+        );
+    };
+
+    useEffect(() => {
+        return () => {
+            Object.values(logIntervalsRef.current).forEach((id) => clearInterval(id));
+            Object.values(statIntervalsRef.current).forEach((id) => clearInterval(id));
+            Object.values(startupTimersRef.current).forEach((id) => clearTimeout(id));
+        };
+    }, []);
+
+    useEffect(() => {
+        Object.values(logIntervalsRef.current).forEach((id) => clearInterval(id));
+        Object.values(statIntervalsRef.current).forEach((id) => clearInterval(id));
+        if (activeServerId) {
+            fetchAndUpdateStatus(activeServerId);
+            fetchAndUpdateLogs(activeServerId);
+            statIntervalsRef.current[activeServerId] = window.setInterval(
+                () => fetchAndUpdateStatus(activeServerId),
+                6000
+            );
+            logIntervalsRef.current[activeServerId] = window.setInterval(
+                () => fetchAndUpdateLogs(activeServerId),
+                5000
+            );
+        }
+    }, [activeServerId]);
 
     const addNotifications = (messages: string[]) => {
         if (!messages.length) return;
@@ -57,25 +291,6 @@ const App: React.FC = () => {
         setUnreadCount((count) => count + messages.length);
     };
 
-    const createServer = (name: string, port: number): Server => {
-        const newServer: Server = {
-            id: `srv-${Date.now()}`,
-            name,
-            type: 'Unknown',
-            version: 'latest',
-            port,
-            status: 'MAINTENANCE',
-            players: 0,
-            maxPlayers: 20,
-            ramUsage: 0,
-            ramLimit: 8,
-        };
-        setServers((prev) => [...prev, newServer]);
-        addNotifications([`Created server "${newServer.name}".`]);
-        setActiveServerId(newServer.id);
-        return newServer;
-    };
-
     const uniqueServerName = (baseName: string): string => {
         const existing = new Set(servers.map((s) => s.name.toLowerCase()));
         if (!existing.has(baseName.toLowerCase())) return baseName;
@@ -86,82 +301,95 @@ const App: React.FC = () => {
         return `${baseName} (${i})`;
     };
 
-    const uniqueNameForServer = (baseName: string, currentId?: string | null): string => {
-        const existing = new Set(
-            servers.filter((s) => s.id !== currentId).map((s) => s.name.toLowerCase())
-        );
-        if (!existing.has(baseName.toLowerCase())) return baseName;
-        let i = 2;
-        while (existing.has(`${baseName} (${i})`.toLowerCase())) {
-            i += 1;
-        }
-        return `${baseName} (${i})`;
-    };
-
-    const handleInstallRequest = (modpack: Modpack, options?: InstallRequestOptions) => {
-        // This is a placeholder install handler. In a real app this would trigger
-        // backend provisioning. Here we optionally create a new server entry and
-        // emit a notification.
-        let targetServerId = options?.serverId;
+    const handleInstallRequest = async (modpack: Modpack, options?: InstallRequestOptions) => {
         const versionLabel = options?.versionNumber || modpack.updatedAt || 'latest';
         const loaderLabel = options?.loaders?.[0] || modpack.loaders?.[0] || 'Unknown';
         const baseName = options?.serverName || `${modpack.title} Server`;
+        const versionId = options?.versionId;
 
-        if (!targetServerId || options?.createNew) {
-            const nextPort = options?.serverPort ?? 25565 + servers.length;
-            const name = uniqueServerName(baseName);
-            const newServer = createServer(name, nextPort);
-            // Apply modpack-derived metadata
-            setServers((prev) =>
-                prev.map((srv) =>
-                    srv.id === newServer.id
-                        ? { ...srv, type: loaderLabel, version: versionLabel }
-                        : srv
-                )
-            );
-            targetServerId = newServer.id;
-        } else {
-            // Update existing server metadata
-            setServers((prev) =>
-                prev.map((srv) =>
-                    srv.id === targetServerId
-                        ? {
-                              ...srv,
-                              name: uniqueNameForServer(baseName, srv.id),
-                              type: loaderLabel,
-                              version: versionLabel,
-                          }
-                        : srv
-                )
-            );
+        if (!versionId) {
+            addNotifications([`Cannot install ${modpack.title}: missing version selection.`]);
+            return;
         }
 
-        const targetServer = servers.find((s) => s.id === targetServerId);
-        const notifName =
-            targetServer?.name ||
-            (options?.createNew ? baseName : uniqueNameForServer(baseName, targetServerId));
-        addNotifications([
-            options?.createNew
-                ? `Created server "${notifName}" for ${modpack.title}.`
-                : `Queued install of ${modpack.title} on server "${notifName}".`,
-        ]);
-
-        if (targetServerId) {
-            setActiveServerId(targetServerId);
+        try {
+            const nextPort = options?.serverPort ?? 25565 + servers.length;
+            const name = uniqueServerName(baseName);
+            const created = await apiCreateServer({
+                name,
+                project_id: modpack.id,
+                version_id: versionId,
+                version_number: versionLabel,
+                loader: loaderLabel,
+                port: nextPort,
+                ram_gb: 4,
+            });
+            const mapped = mapInstanceToServer(created);
+            setServers((prev) => [...prev, mapped]);
+            ensureServerStats(mapped);
+            addNotifications([`Created server "${mapped.name}" for ${modpack.title}.`]);
+            setActiveServerId(mapped.id);
             setCurrentView(View.DASHBOARD);
+            appendLog(mapped.id, 'Server created. Click start to launch.', LogLevel.INFO);
+        } catch (err: any) {
+            addNotifications([`Failed to create server: ${err?.message || err}`]);
         }
     };
 
     const updateServer = (serverId: string, updates: Partial<Server>) => {
         setServers((prev) =>
-            prev.map((srv) => (srv.id === serverId ? { ...srv, ...updates } : srv))
+            prev.map((srv) => {
+                if (srv.id !== serverId) return srv;
+                const nextRamLimit = updates.ramLimit ?? srv.ramLimit;
+                return {
+                    ...srv,
+                    ...updates,
+                    ramLimit: nextRamLimit,
+                    ramUsage: Math.min(srv.ramUsage, nextRamLimit),
+                };
+            })
         );
+        if (updates.ramLimit !== undefined || updates.status !== undefined) {
+            setServerStats((prev) => {
+                const current = prev[serverId];
+                if (!current) return prev;
+                return {
+                    ...prev,
+                    [serverId]: {
+                        ...current,
+                        ramTotal: updates.ramLimit ?? current.ramTotal,
+                        ramUsage:
+                            updates.ramLimit !== undefined
+                                ? Math.min(current.ramUsage, updates.ramLimit)
+                                : current.ramUsage,
+                        status: (updates.status as ServerStats['status']) ?? current.status,
+                    },
+                };
+            });
+        }
     };
 
+    useEffect(() => {
+        servers.forEach(ensureServerStats);
+    }, [servers]);
+
     const renderView = () => {
+        const activeServer = servers.find((s) => s.id === activeServerId) || servers[0] || null;
+
         switch (currentView) {
             case View.DASHBOARD:
-                return <ServerConsole server={servers.find((s) => s.id === activeServerId) || servers[0] || null} />;
+                return (
+                    <ServerConsole
+                        server={activeServer}
+                        logs={activeServer ? serverLogs[activeServer.id] || [] : []}
+                        stats={activeServer ? serverStats[activeServer.id] : undefined}
+                        onStart={activeServer ? () => startServer(activeServer.id) : undefined}
+                        onStop={activeServer ? () => stopServer(activeServer.id) : undefined}
+                        onSendCommand={
+                            activeServer ? (command) => handleSendCommand(activeServer.id, command) : undefined
+                        }
+                    />
+                );
             case View.MODPACKS:
                 return selectedModpack ? (
                     <ModpackDetail
@@ -222,6 +450,7 @@ const App: React.FC = () => {
                                     imageUrl: data.icon_url || modpack.imageUrl,
                                     followers: data.followers ? data.followers.toLocaleString() : modpack.followers,
                                     updatedAt: data.updated || data.date_modified || modpack.updatedAt,
+                                    serverSide: data.server_side || modpack.serverSide,
                                 });
                             } catch (err: any) {
                                 setDetailError(err?.message || 'Failed to load details.');
@@ -235,12 +464,14 @@ const App: React.FC = () => {
                 return (
                     <ServerList
                         servers={servers}
+                        statsById={serverStats}
                         onSelectServer={handleServerSelect}
                         onCreateServer={() => {
-                            const port = 25565 + servers.length;
-                            createServer(`New Server ${servers.length + 1}`, port);
+                            addNotifications(['Create a server via the Modpack install flow to provision files.']);
                         }}
                         onUpdateServer={updateServer}
+                        onStartServer={startServer}
+                        onStopServer={stopServer}
                     />
                 );
             case View.SETTINGS:

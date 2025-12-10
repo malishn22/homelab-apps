@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Server } from '../types';
+import { Server, ServerStats } from '../types';
 import { Play, Square, Settings, Users, Activity, Plus, Terminal } from 'lucide-react';
 
 interface ServerListProps {
@@ -7,9 +7,20 @@ interface ServerListProps {
     onSelectServer: (serverId: string) => void;
     onCreateServer?: () => void;
     onUpdateServer?: (serverId: string, updates: Partial<Server>) => void;
+    onStartServer?: (serverId: string) => void;
+    onStopServer?: (serverId: string) => void;
+    statsById?: Record<string, ServerStats>;
 }
 
-const ServerList: React.FC<ServerListProps> = ({ servers = [], onSelectServer, onCreateServer, onUpdateServer }) => {
+const ServerList: React.FC<ServerListProps> = ({
+    servers = [],
+    onSelectServer,
+    onCreateServer,
+    onUpdateServer,
+    onStartServer,
+    onStopServer,
+    statsById = {},
+}) => {
     const [editing, setEditing] = useState<Server | null>(null);
     const [editForm, setEditForm] = useState<Partial<Server>>({});
     const getStatusColor = (status: string) => {
@@ -20,6 +31,15 @@ const ServerList: React.FC<ServerListProps> = ({ servers = [], onSelectServer, o
             case 'MAINTENANCE': return 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.4)]';
             default: return 'bg-zinc-500';
         }
+    };
+    const getStatsForServer = (server: Server): ServerStats | undefined => statsById[server.id];
+    const getRamUsage = (server: Server) => {
+        const stats = getStatsForServer(server);
+        return typeof stats?.ramUsage === 'number' ? stats.ramUsage : server.ramUsage;
+    };
+    const getRamLimit = (server: Server) => {
+        const stats = getStatsForServer(server);
+        return typeof stats?.ramTotal === 'number' ? stats.ramTotal : server.ramLimit;
     };
 
     return (
@@ -44,7 +64,13 @@ const ServerList: React.FC<ServerListProps> = ({ servers = [], onSelectServer, o
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {servers.map((server) => (
+                    {servers.map((server) => {
+                        const ramUsage = getRamUsage(server);
+                        const ramLimit = getRamLimit(server);
+                        const ramPercent = ramLimit > 0 ? Math.min(100, (ramUsage / ramLimit) * 100) : 0;
+                        const isOnline = server.status === 'ONLINE';
+                        const isStarting = server.status === 'STARTING';
+                        return (
                         <div key={server.id} className="glass-panel p-6 rounded-2xl relative group glass-panel-hover transition-all duration-300">
                             <div className="flex justify-between items-start mb-6">
                                 <div className="flex gap-4">
@@ -73,12 +99,12 @@ const ServerList: React.FC<ServerListProps> = ({ servers = [], onSelectServer, o
                                         <Activity size={14} /> RAM
                                     </div>
                                     <div className="text-lg font-semibold text-white">
-                                        {server.ramUsage} <span className="text-sm text-text-dim">GB</span>
+                                        {Number.isFinite(ramUsage) ? ramUsage.toFixed(1) : ramUsage} <span className="text-sm text-text-dim">GB</span>
                                     </div>
                                     <div className="w-full h-1 bg-bg-surface rounded-full mt-2 overflow-hidden">
                                         <div 
                                             className="h-full bg-accent" 
-                                            style={{ width: `${(server.ramUsage / server.ramLimit) * 100}%` }}
+                                            style={{ width: `${ramPercent}%` }}
                                         ></div>
                                     </div>
                                 </div>
@@ -92,12 +118,20 @@ const ServerList: React.FC<ServerListProps> = ({ servers = [], onSelectServer, o
                                     <Terminal size={16} /> Console
                                 </button>
                                 
-                                {server.status === 'ONLINE' ? (
-                                    <button className="p-2.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 transition-colors">
+                                {isOnline ? (
+                                    <button
+                                        disabled={isStarting}
+                                        onClick={() => onStopServer?.(server.id)}
+                                        className="p-2.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                    >
                                         <Square size={18} fill="currentColor" />
                                     </button>
                                 ) : (
-                                    <button className="p-2.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 border border-emerald-500/20 transition-colors">
+                                    <button
+                                        disabled={isStarting}
+                                        onClick={() => onStartServer?.(server.id)}
+                                        className="p-2.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 border border-emerald-500/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                    >
                                         <Play size={18} fill="currentColor" />
                                     </button>
                                 )}
@@ -112,7 +146,8 @@ const ServerList: React.FC<ServerListProps> = ({ servers = [], onSelectServer, o
                                 </button>
                             </div>
                         </div>
-                    ))}
+                        );
+                    })}
                 </div>
             )}
         </div>
@@ -129,7 +164,10 @@ const ServerList: React.FC<ServerListProps> = ({ servers = [], onSelectServer, o
                                 <div className="text-xs text-text-muted mt-2 space-x-2">
                                     <span>ID: {editing.id}</span>
                                     <span>• Players {editing.players}/{editing.maxPlayers}</span>
-                                    <span>• RAM {editing.ramUsage}/{editing.ramLimit} GB</span>
+                                    <span>
+                                        • RAM {Number.isFinite(getRamUsage(editing)) ? getRamUsage(editing).toFixed(1) : getRamUsage(editing)}
+                                        /{getRamLimit(editing)} GB
+                                    </span>
                                 </div>
                             </div>
                             <div className="flex flex-col items-end gap-2">
@@ -170,6 +208,21 @@ const ServerList: React.FC<ServerListProps> = ({ servers = [], onSelectServer, o
                                     className="w-full rounded-xl bg-bg-surface/80 border border-border-main px-4 py-3 text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary appearance-none"
                                     value={editForm.maxPlayers ?? editing.maxPlayers}
                                     onChange={(e) => setEditForm((prev) => ({ ...prev, maxPlayers: parseInt(e.target.value, 10) || editing.maxPlayers }))}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-xs text-text-dim block">RAM Limit (GB)</label>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    className="w-full rounded-xl bg-bg-surface/80 border border-border-main px-4 py-3 text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary appearance-none"
+                                    value={editForm.ramLimit ?? editing.ramLimit}
+                                    onChange={(e) =>
+                                        setEditForm((prev) => ({
+                                            ...prev,
+                                            ramLimit: Math.max(1, parseFloat(e.target.value) || editing.ramLimit),
+                                        }))
+                                    }
                                 />
                             </div>
                         </div>

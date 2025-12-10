@@ -55,6 +55,8 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
     const [isCheckingServers, setIsCheckingServers] = useState(false);
     const [serverVersions, setServerVersions] = useState<ServerVersionOption[]>([]);
     const [serverError, setServerError] = useState<string | null>(null);
+    const [serverAvailable, setServerAvailable] = useState(false);
+    const [serverCheckComplete, setServerCheckComplete] = useState(false);
     const [showServerPanel, setShowServerPanel] = useState(false);
     const [selectedVersionId, setSelectedVersionId] = useState<string | undefined>(undefined);
     const [selectedServerId, setSelectedServerId] = useState<string | undefined>(servers[0]?.id);
@@ -106,11 +108,21 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
         )
         .sort((a, b) => a.localeCompare(b));
 
-    const hasServerSupport = useMemo(() => serverVersions.length > 0, [serverVersions]);
-
     const handleInstallClick = async () => {
         setServerError(null);
         setIsCheckingServers(true);
+        setServerAvailable(false);
+        setServerCheckComplete(false);
+        setServerVersions([]);
+
+        if ((modpack.serverSide || '').toLowerCase() === 'unsupported') {
+            setServerError('This modpack is client-only. No server packs available.');
+            setIsCheckingServers(false);
+            setServerCheckComplete(true);
+            setShowServerPanel(true);
+            setServerVersions([]);
+            return;
+        }
         try {
             const resp = await fetchServerFiles(modpack.id);
             const mapped: ServerVersionOption[] = (resp.versions || []).map((v: ServerVersion) => {
@@ -121,23 +133,29 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                     gameVersions: v.game_versions,
                     loaders: v.loaders,
                     datePublished: v.date_published,
+                    serverSupported: v.server_supported !== false && (v.files || []).length > 0,
                 };
             });
 
             setServerVersions(mapped);
             setShowServerPanel(true);
             setPanelStep('version');
-            setSelectedVersionId(mapped[0]?.id);
+            const firstSupported = mapped.find((m) => m.serverSupported);
+            setSelectedVersionId(firstSupported?.id);
             setNewServerName(`${modpack.title} Server`);
             setNewServerPort(25565);
 
-            if (!resp.available || mapped.length === 0) {
+            const hasServers = Boolean(resp.available && mapped.some((m) => m.serverSupported));
+            setServerAvailable(hasServers);
+            if (!hasServers) {
                 setServerError('No server-ready files found for this modpack yet.');
+                setSelectedVersionId(undefined);
             }
         } catch (err: any) {
             setServerError(err?.message || 'Failed to check server files.');
         } finally {
             setIsCheckingServers(false);
+            setServerCheckComplete(true);
         }
     };
 
@@ -145,6 +163,14 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
         () => serverVersions.find((v) => v.id === selectedVersionId),
         [serverVersions, selectedVersionId]
     );
+
+    useEffect(() => {
+        setServerVersions([]);
+        setServerError(null);
+        setServerAvailable(false);
+        setServerCheckComplete(false);
+        setShowServerPanel(false);
+    }, [modpack.id]);
 
     useEffect(() => {
         if (!selectedServerId && servers.length > 0) {
@@ -175,11 +201,35 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                     <div className="absolute bottom-4 left-6 right-6 flex items-center justify-between">
                         <div>
                             <div className="text-xs uppercase tracking-wider text-text-muted mb-1">Modrinth Pack</div>
-                            <h1 className="text-3xl font-bold text-white">{modpack.title}</h1>
+                            <h1 className="text-3xl font-bold text-white flex items-center gap-3">
+                                {modpack.title}
+                                {modpack.serverSide ? (
+                                    (modpack.serverSide || '').toLowerCase() === 'unsupported' ? (
+                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-500/10 text-red-300 border border-red-500/30 text-[11px] uppercase tracking-wide">
+                                            <X size={12} /> Client only
+                                        </span>
+                                    ) : (
+                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 text-[11px] uppercase tracking-wide">
+                                            <CheckCircle2 size={12} /> Server Exist
+                                        </span>
+                                    )
+                                ) : null}
+                            </h1>
                             <div className="text-sm text-text-muted">by {modpack.author}</div>
                         </div>
                         <div className="flex items-center gap-3">
                             {loading && <span className="text-text-dim text-xs">Loading…</span>}
+                            {serverCheckComplete && (
+                                <span
+                                    className={`px-3 py-1 rounded-full text-xs font-semibold border ${
+                                        serverAvailable
+                                            ? 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
+                                            : 'text-red-300 border-red-500/40 bg-red-500/10'
+                                    }`}
+                                >
+                                    {serverAvailable ? 'Server Exist' : 'No server pack'}
+                                </span>
+                            )}
                             <button
                                 onClick={handleInstallClick}
                                 disabled={isCheckingServers}
@@ -231,8 +281,9 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                     )}
 
                     {serverError && (
-                        <div className="text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
-                            {serverError}
+                        <div className="text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg p-3 flex items-center gap-2">
+                            <X size={16} />
+                            <span>{serverError}</span>
                         </div>
                     )}
 
@@ -290,13 +341,30 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                         <p className="text-text-muted text-sm mb-4">
                             Choose a server build version to prepare installation. (Install flow coming next.)
                         </p>
+                        {serverCheckComplete && (
+                            <div
+                                className={`flex items-center gap-2 mb-3 text-sm ${
+                                    serverAvailable ? 'text-emerald-400' : 'text-red-400'
+                                }`}
+                            >
+                                {serverAvailable ? <CheckCircle2 size={16} /> : <X size={16} />}
+                                <span>
+                                    {serverAvailable
+                                        ? 'Server pack detected. You can continue.'
+                                        : 'No server pack available for this modpack/version.'}
+                                </span>
+                            </div>
+                        )}
 
                         {isCheckingServers && (
                             <div className="text-text-dim text-sm">Checking available server files...</div>
                         )}
 
                         {!isCheckingServers && serverVersions.length === 0 && (
-                            <div className="text-text-muted text-sm">No server-ready files found for this modpack.</div>
+                            <div className="text-red-300 text-sm flex items-center gap-2">
+                                <X size={14} />
+                                No server-ready files found for this modpack.
+                            </div>
                         )}
 
                         {!isCheckingServers && serverVersions.length > 0 && panelStep === 'version' && (
@@ -305,33 +373,53 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                                 <div className="max-h-52 overflow-auto space-y-2 pr-1">
                                     {serverVersions.map((ver) => {
                                         const isActive = ver.id === selectedVersionId;
+                                        const supported = ver.serverSupported !== false;
                                         return (
                                             <button
                                                 key={ver.id || ver.versionNumber}
-                                                onClick={() => setSelectedVersionId(ver.id)}
+                                                onClick={() => supported && setSelectedVersionId(ver.id)}
                                                 className={`w-full text-left rounded-xl border px-3 py-2 transition-all ${
                                                     isActive
                                                         ? 'border-primary/60 bg-primary/10 shadow-[0_6px_20px_rgba(127,90,240,0.25)]'
-                                                        : 'border-border-main bg-bg-surface/70 hover:border-primary/40 hover:bg-primary/5'
+                                                        : supported
+                                                        ? 'border-border-main bg-bg-surface/70 hover:border-primary/40 hover:bg-primary/5'
+                                                        : 'border-border-main bg-bg-surface/50 cursor-not-allowed opacity-60'
                                                 }`}
                                             >
                                                 <div className="flex items-center justify-between gap-2">
                                                     <div className="text-white font-semibold">
                                                         {ver.versionNumber || 'Unknown version'}
                                                     </div>
-                                                    {isActive && (
+                                                    <div className="flex items-center gap-2">
+                                                    {supported ? (
+                                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                                                            Server Exist
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/15 text-red-300 border border-red-500/30">
+                                                            Client only
+                                                        </span>
+                                                    )}
+                                                    {isActive && supported && (
                                                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30">
                                                             Selected
                                                         </span>
                                                     )}
+                                                    </div>
                                                 </div>
-                                                <div className="flex items-center justify-between text-[11px] text-text-dim mt-1 gap-2">
+                                                <div className="flex items-center justify-between text-[11px] text-text-dim mt-1 gap-2 flex-wrap">
                                                     <span className="text-text-muted">
                                                         {(ver.loaders || []).join(', ') || 'No loaders'}
                                                     </span>
-                                                    <span>
-                                                        {(ver.gameVersions || []).join(', ') || 'No game versions'}
-                                                    </span>
+                                                    <div className="flex items-center gap-2">
+                                                        <span>
+                                                            {(ver.gameVersions || []).join(', ') || 'No game versions'}
+                                                        </span>
+                                                        <span className="flex items-center gap-1 text-emerald-400">
+                                                            <CheckCircle2 size={12} />
+                                                            Server pack
+                                                        </span>
+                                                    </div>
                                                 </div>
                                             </button>
                                         );
@@ -410,7 +498,12 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                             )}
                             {panelStep === 'version' && (
                                 <button
-                                    disabled={!selectedVersionId || isCheckingServers}
+                                    disabled={
+                                        !selectedVersionId ||
+                                        isCheckingServers ||
+                                        !serverAvailable ||
+                                        !serverVersions.find((v) => v.id === selectedVersionId && v.serverSupported !== false)
+                                    }
                                     className="px-4 py-2 rounded-lg bg-primary text-white font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
                                     onClick={() => {
                                         setPanelStep('server');
@@ -433,7 +526,12 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                                     {servers.length === 0 ? (
                                         <button
                                             className="px-4 py-2 rounded-lg bg-primary text-white font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
-                                            disabled={!selectedVersionId || !newServerName}
+                                            disabled={
+                                                !selectedVersionId ||
+                                                !newServerName ||
+                                                !serverAvailable ||
+                                                !serverVersions.find((v) => v.id === selectedVersionId && v.serverSupported !== false)
+                                            }
                                             onClick={() => {
                                                 setShowServerPanel(false);
                                                 onInstall?.(modpack, {
@@ -450,7 +548,12 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                                         </button>
                                     ) : (
                                         <button
-                                            disabled={!selectedServerId || !selectedVersionId}
+                                            disabled={
+                                                !selectedServerId ||
+                                                !selectedVersionId ||
+                                                !serverAvailable ||
+                                                !serverVersions.find((v) => v.id === selectedVersionId && v.serverSupported !== false)
+                                            }
                                             className="px-4 py-2 rounded-lg bg-primary text-white font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
                                             onClick={() => {
                                                 setShowServerPanel(false);
