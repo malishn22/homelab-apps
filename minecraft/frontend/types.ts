@@ -62,7 +62,7 @@ export interface ServerStats {
   ramTotal: number; // in GB
   cpuLoad: number; // percentage
   tps: number; // ticks per second
-  status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'STOPPING' | 'MAINTENANCE';
+  status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'STOPPING' | 'MAINTENANCE' | 'PREPARING';
 }
 
 export interface Server {
@@ -71,7 +71,7 @@ export interface Server {
     type: string;
     version: string;
     port: number;
-    status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'MAINTENANCE';
+    status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'MAINTENANCE' | 'PREPARING';
     players: number;
     maxPlayers: number;
     ramUsage: number;

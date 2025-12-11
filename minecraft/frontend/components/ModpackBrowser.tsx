@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modpack } from '../types';
 import { fetchTopModpacks, ModrinthModpack, refreshModpacks } from '../src/api/modpacks';
-import { Search, Download, Sparkles, Users, Clock, RefreshCcw, ServerCrash, Server as ServerIcon, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Download, Sparkles, Users, Clock, RefreshCcw, ServerCrash, Server as ServerIcon, ChevronLeft, ChevronRight, CheckCircle2 } from 'lucide-react';
 
 const formatDownloads = (downloads?: number): string => {
     if (typeof downloads !== 'number') return 'N/A';
@@ -307,12 +307,12 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
                                                     {pack.title}
                                                     {pack.serverSide ? (
                                                         (pack.serverSide || '').toLowerCase() === 'unsupported' ? (
-                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/10 text-red-300 border border-red-500/30 text-[10px] uppercase tracking-wide">
-                                                                <ServerCrash size={12} /> Client only
+                                                            <span className="inline-flex items-center gap-1 px-2 py-[2px] rounded-full bg-red-500/10 text-red-300 border border-red-500/30 text-[9px] leading-none uppercase tracking-wide">
+                                                                <ServerCrash size={10} /> Client only
                                                             </span>
                                                         ) : (
-                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 text-[10px] uppercase tracking-wide">
-                                                                <ServerIcon size={12} /> Server Exist
+                                                            <span className="inline-flex items-center gap-1 px-2 py-[2px] rounded-full border border-emerald-500/50 text-emerald-300 bg-transparent text-[9px] leading-none uppercase tracking-wide">
+                                                                <CheckCircle2 size={10} /> Server Exist
                                                             </span>
                                                         )
                                                     ) : null}
@@ -484,7 +484,7 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
                                         className="bg-bg-surface/60 border border-border-main rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                                     >
                                         <option value="all">All</option>
-                                        <option value="server">Server Exist</option>
+                                        <option value="server">Server</option>
                                         <option value="client">Client only</option>
                                     </select>
                                     <div className="flex items-center gap-2">

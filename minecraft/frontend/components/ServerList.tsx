@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Server, ServerStats } from '../types';
-import { Play, Square, Settings, Users, Activity, Plus, Terminal } from 'lucide-react';
+import { Play, Square, Settings, Users, Activity, Plus, Terminal, Trash } from 'lucide-react';
 
 interface ServerListProps {
     servers?: Server[];
@@ -9,6 +9,7 @@ interface ServerListProps {
     onUpdateServer?: (serverId: string, updates: Partial<Server>) => void;
     onStartServer?: (serverId: string) => void;
     onStopServer?: (serverId: string) => void;
+    onDeleteServer?: (serverId: string) => void;
     statsById?: Record<string, ServerStats>;
 }
 
@@ -19,6 +20,7 @@ const ServerList: React.FC<ServerListProps> = ({
     onUpdateServer,
     onStartServer,
     onStopServer,
+    onDeleteServer,
     statsById = {},
 }) => {
     const [editing, setEditing] = useState<Server | null>(null);
@@ -28,6 +30,7 @@ const ServerList: React.FC<ServerListProps> = ({
             case 'ONLINE': return 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.4)]';
             case 'OFFLINE': return 'bg-zinc-500';
             case 'STARTING': return 'bg-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.4)]';
+            case 'PREPARING': return 'bg-blue-400 shadow-[0_0_10px_rgba(96,165,250,0.4)]';
             case 'MAINTENANCE': return 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.4)]';
             default: return 'bg-zinc-500';
         }
@@ -70,6 +73,7 @@ const ServerList: React.FC<ServerListProps> = ({
                         const ramPercent = ramLimit > 0 ? Math.min(100, (ramUsage / ramLimit) * 100) : 0;
                         const isOnline = server.status === 'ONLINE';
                         const isStarting = server.status === 'STARTING';
+                        const isPreparing = server.status === 'PREPARING';
                         return (
                         <div key={server.id} className="glass-panel p-6 rounded-2xl relative group glass-panel-hover transition-all duration-300">
                             <div className="flex justify-between items-start mb-6">
@@ -120,7 +124,7 @@ const ServerList: React.FC<ServerListProps> = ({
                                 
                                 {isOnline ? (
                                     <button
-                                        disabled={isStarting}
+                                        disabled={isStarting || isPreparing}
                                         onClick={() => onStopServer?.(server.id)}
                                         className="p-2.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                                     >
@@ -128,7 +132,7 @@ const ServerList: React.FC<ServerListProps> = ({
                                     </button>
                                 ) : (
                                     <button
-                                        disabled={isStarting}
+                                        disabled={isStarting || isPreparing}
                                         onClick={() => onStartServer?.(server.id)}
                                         className="p-2.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 border border-emerald-500/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                                     >
@@ -143,6 +147,16 @@ const ServerList: React.FC<ServerListProps> = ({
                                     }}
                                 >
                                     <Settings size={18} />
+                                </button>
+                                <button
+                                    className="p-2.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 transition-colors"
+                                    onClick={() => {
+                                        if (window.confirm(`Delete server "${server.name}"? This cannot be undone.`)) {
+                                            onDeleteServer?.(server.id);
+                                        }
+                                    }}
+                                >
+                                    <Trash size={18} />
                                 </button>
                             </div>
                         </div>
@@ -236,6 +250,18 @@ const ServerList: React.FC<ServerListProps> = ({
                                 }}
                             >
                                 Cancel
+                            </button>
+                            <button
+                                className="px-5 py-2.5 rounded-lg bg-red-500/10 text-red-300 font-semibold hover:bg-red-500/20 border border-red-500/30 transition-colors"
+                                onClick={() => {
+                                    if (editing && window.confirm(`Delete server "${editing.name}"? This cannot be undone.`)) {
+                                        onDeleteServer?.(editing.id);
+                                        setEditing(null);
+                                        setEditForm({});
+                                    }
+                                }}
+                            >
+                                Delete
                             </button>
                             <button
                                 className="px-5 py-2.5 rounded-lg bg-primary text-white font-semibold hover:bg-primary/90 transition-colors"

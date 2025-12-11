@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { LogLevel } from '../types';
 import type { LogEntry, ServerStats, Server } from '../types';
-import { Square, RefreshCw, Cpu, HardDrive, Terminal, ChevronRight } from 'lucide-react';
+import { Square, RefreshCw, Cpu, HardDrive, Terminal, ChevronRight, Play } from 'lucide-react';
 
 interface ServerConsoleProps {
     server: Server | null;
@@ -29,6 +29,7 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
 
     const isOnline = server?.status === 'ONLINE';
     const isStarting = server?.status === 'STARTING';
+    const isPreparing = server?.status === 'PREPARING';
     const ramPercent = effectiveStats.ramTotal > 0 ? Math.min(100, (effectiveStats.ramUsage / effectiveStats.ramTotal) * 100) : 0;
     const statusColor =
         effectiveStats.status === 'ONLINE'
@@ -55,14 +56,73 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
         setCommand('');
     };
 
-    const getLevelColor = (level: LogLevel) => {
-        switch(level) {
-            case LogLevel.INFO: return 'text-primary';
-            case LogLevel.WARN: return 'text-yellow-400';
-            case LogLevel.ERROR: return 'text-red-500';
-            case LogLevel.SUCCESS: return 'text-accent';
-            default: return 'text-text-muted';
+    const renderBadge = (message: string, level: LogLevel) => {
+        const lower = message.toLowerCase();
+
+        // Detect the Minecraft "server ready" line, e.g.
+        // "Done (5.23s)! For help, type "help""
+        const isMcReady =
+            lower.includes('done (') || lower.includes('for help, type "help"');
+
+        // PREP
+        if (lower.includes('[prep]')) {
+            return (
+                <span className="mr-2 text-[10px] font-semibold text-primary">
+                    [PREP]
+                </span>
+            );
         }
+
+        // SUCCESS:
+        //  - explicit [SUCCESS] prefix
+        //  - our "Completed. Ready to start." message
+        //  - Minecraft "Done (...)! For help, type "help"" line when server is ready
+        if (
+            lower.includes('[success]') ||
+            lower.includes('completed. ready to start') ||
+            isMcReady
+        ) {
+            return (
+                <span className="mr-2 text-[10px] font-semibold text-emerald-300">
+                    [SUCCESS]
+                </span>
+            );
+        }
+
+        // FAIL
+        if (lower.includes('fail') || lower.includes('error')) {
+            return (
+                <span className="mr-2 text-[10px] font-semibold text-red-300">
+                    [FAIL]
+                </span>
+            );
+        }
+
+        // COMMAND
+        if (message.trim().startsWith('>')) {
+            return (
+                <span className="mr-2 text-[10px] font-semibold text-blue-200">
+                    [CMD]
+                </span>
+            );
+        }
+
+        // Default → INFO
+        return (
+            <span className="mr-2 text-[10px] font-semibold text-text-muted">
+                [INFO]
+            </span>
+        );
+    };
+
+    const stripPrefixes = (message: string) => {
+        return message
+            .replace(/^\[info\]\s*/i, '')
+            .replace(/^\[prep\]\s*/i, '')
+            .replace(/^\[success\]\s*/i, '')
+            .replace(/^\[fail\]\s*/i, '')
+            .replace(/^\[cmd\]\s*/i, '')
+            .trim();
     };
 
     if (!server) {
@@ -90,10 +150,10 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
                 <div className="flex gap-2">
                     <button
                         onClick={() => onStart?.()}
-                        disabled={!server || isStarting}
+                        disabled={!server || isStarting || isPreparing}
                         className="flex items-center gap-2 px-4 py-2 bg-bg-surface hover:bg-bg-hover text-white rounded-lg border border-border-main transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
                     >
-                        <RefreshCw size={16} /> <span className="hidden sm:inline">{isOnline ? 'Restart' : 'Start'}</span>
+                        {isOnline ? <RefreshCw size={16} /> : <Play size={16} />} <span className="hidden sm:inline">{isOnline ? 'Restart' : 'Start'}</span>
                     </button>
                     <button
                         onClick={() => onStop?.()}
@@ -169,7 +229,7 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
             </div>
 
             {/* Console Window */}
-            <div className="flex-1 min-h-0 bg-bg-console border border-border-main rounded-xl flex flex-col relative group shadow-2xl overflow-hidden">
+            <div className="h-[45vh] min-h-[260px] bg-bg-console border border-border-main rounded-xl flex flex-col relative group shadow-2xl overflow-hidden">
                 {/* Console Header */}
                 <div className="flex items-center justify-between px-4 py-2 border-b border-white/5 bg-white/5 backdrop-blur">
                     <div className="flex gap-2">
@@ -180,12 +240,12 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
                 </div>
 
                 {/* Log Output */}
-                <div className="flex-1 overflow-y-auto p-4 font-mono text-sm console-scrollbar space-y-1">
+                <div className="flex-1 overflow-y-auto p-4 font-mono text-xs leading-5 console-scrollbar space-y-1">
                     {logs.map((log) => (
                         <div key={log.id} className="break-all font-medium">
                             <span className="text-text-dim select-none mr-2">{log.timestamp}</span>
-                            <span className={`${getLevelColor(log.level)} mr-2`}>[{log.level}]</span>
-                            <span className="text-gray-300">{log.message}</span>
+                            {renderBadge(log.message, log.level)}
+                            <span className="text-gray-300 whitespace-pre-wrap">{stripPrefixes(log.message)}</span>
                         </div>
                     ))}
                     
@@ -200,14 +260,14 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
 
             {/* Input Line */}
             <form className="mt-4 relative" onSubmit={handleSubmit}>
-                <ChevronRight className="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted" size={18} />
+                <ChevronRight className="absolute left-4 top-1/2 -translate-y-1/2 text-accent" size={18} />
                 <input 
                     type="text" 
                     placeholder={server ? 'Enter command...' : 'Start a server to send commands'}
                     value={command}
                     disabled={!server}
                     onChange={(e) => setCommand(e.target.value)}
-                    className="w-full bg-glass border border-white/10 rounded-xl py-3 pl-10 pr-4 text-white font-mono text-sm focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all placeholder:text-text-dim disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="w-full bg-bg-console/80 border border-white/15 rounded-xl py-3 pl-10 pr-4 text-accent font-mono text-sm focus:outline-none focus:border-accent/70 focus:ring-1 focus:ring-accent/50 transition-all placeholder:text-text-dim disabled:opacity-60 disabled:cursor-not-allowed caret-accent"
                 />
             </form>
         </div>

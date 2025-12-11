@@ -15,6 +15,7 @@ import {
     fetchLogs as apiFetchLogs,
     fetchStatus as apiFetchStatus,
     sendCommand as apiSendCommand,
+    deleteServer as apiDeleteServer,
 } from './src/api/servers';
 
 type NotificationItem = {
@@ -38,6 +39,8 @@ const App: React.FC = () => {
     const logIntervalsRef = useRef<Record<string, number>>({});
     const statIntervalsRef = useRef<Record<string, number>>({});
     const startupTimersRef = useRef<Record<string, number>>({});
+    const lastLogTailRef = useRef<Record<string, string | undefined>>({});
+    const lastStatusRef = useRef<Record<string, Server['status'] | undefined>>({});
     const notificationsRef = useRef<HTMLDivElement | null>(null);
 
     const mapInstanceToServer = (instance: any): Server => ({
@@ -53,6 +56,7 @@ const App: React.FC = () => {
         ramLimit: instance.ram_gb || 4,
     });
 
+    
     useEffect(() => {
         const bootstrap = async () => {
             try {
@@ -136,48 +140,150 @@ const App: React.FC = () => {
         try {
             const data = await apiFetchStatus(serverId);
             const status = (data.status as Server['status']) || 'OFFLINE';
-            const stats = data.stats;
+            const stats = data.stats ?? {};
+
+            const prevStatus = lastStatusRef.current[serverId];
+            lastStatusRef.current[serverId] = status;
+
+            // Update server list
             setServers((prev) =>
                 prev.map((srv) =>
                     srv.id === serverId
                         ? {
                               ...srv,
                               status,
-                              ramUsage: typeof stats?.ramUsage === 'number' ? stats.ramUsage : srv.ramUsage,
+                              ramUsage:
+                                  typeof stats.ramUsage === 'number'
+                                      ? stats.ramUsage
+                                      : srv.ramUsage,
                               ramLimit: srv.ramLimit,
                           }
                         : srv
                 )
             );
-            if (stats) {
-                setServerStats((prev) => ({
-                    ...prev,
-                    [serverId]: {
-                        ramUsage: stats.ramUsage ?? prev[serverId]?.ramUsage ?? 0,
-                        ramTotal: stats.ramTotal ?? prev[serverId]?.ramTotal ?? 0,
-                        cpuLoad: stats.cpuLoad ?? prev[serverId]?.cpuLoad ?? 0,
-                        tps: stats.tps ?? prev[serverId]?.tps ?? 0,
-                        status,
-                    },
-                }));
+
+            // Update stats
+            setServerStats((prev) => ({
+                ...prev,
+                [serverId]: {
+                    ramUsage: stats.ramUsage ?? prev[serverId]?.ramUsage ?? 0,
+                    ramTotal: stats.ramTotal ?? prev[serverId]?.ramTotal ?? 0,
+                    cpuLoad: stats.cpuLoad ?? prev[serverId]?.cpuLoad ?? 0,
+                    tps: stats.tps ?? prev[serverId]?.tps ?? 0,
+                    status: status as ServerStats['status'],
+                },
+            }));
+
+            // If we just transitioned PREPARING -> OFFLINE, ensure there is exactly
+            // one SUCCESS line in the console for this server.
+            if (prevStatus === 'PREPARING' && status === 'OFFLINE') {
+                setServerLogs((prev) => {
+                    const existing = prev[serverId] || [];
+                    const hasSuccess = existing.some((e) =>
+                        e.message.toLowerCase().includes('completed. ready to start')
+                    );
+                    if (hasSuccess) {
+                        // backend already logged success; do nothing
+                        return prev;
+                    }
+
+                    const now = new Date();
+                    const successEntry: LogEntry = {
+                        id: `${serverId}-${now.getTime()}-${Math.random()
+                            .toString(36)
+                            .slice(2, 6)}`,
+                        timestamp: now.toLocaleTimeString(),
+                        level: LogLevel.SUCCESS,
+                        message: '[SUCCESS] Completed. Ready to start.',
+                    };
+
+                    const merged = [...existing, successEntry].slice(-400);
+                    return { ...prev, [serverId]: merged };
+                });
+            }
+
+            // Stop polling when backend says OFFLINE
+            if (status === 'OFFLINE') {
+                clearServerTimers(serverId);
             }
         } catch (err) {
             console.error('Failed to fetch status', err);
+            clearServerTimers(serverId);
+
+            setServers((prev) =>
+                prev.map((srv) =>
+                    srv.id === serverId ? { ...srv, status: 'OFFLINE' } : srv
+                )
+            );
+
+            setServerStats((prev) => ({
+                ...prev,
+                [serverId]: {
+                    ramUsage: prev[serverId]?.ramUsage ?? 0,
+                    ramTotal: prev[serverId]?.ramTotal ?? 0,
+                    cpuLoad: prev[serverId]?.cpuLoad ?? 0,
+                    tps: prev[serverId]?.tps ?? 0,
+                    status: 'OFFLINE',
+                },
+            }));
+
+            lastStatusRef.current[serverId] = 'OFFLINE';
         }
     };
 
     const fetchAndUpdateLogs = async (serverId: string) => {
         try {
             const lines = await apiFetchLogs(serverId, 200);
-            const mapped: LogEntry[] = lines.map((line, idx) => ({
-                id: `${serverId}-${idx}-${line.slice(0, 8)}`,
-                timestamp: new Date().toLocaleTimeString(),
-                level: LogLevel.INFO,
-                message: line,
-            }));
-            setServerLogs((prev) => ({ ...prev, [serverId]: mapped.slice(-400) }));
+
+            setServerLogs((prev) => {
+                const existing = prev[serverId] || [];
+                const lastSeen = lastLogTailRef.current[serverId];
+
+                const existingMessages = new Set(
+                    existing.map((e) => e.message.toLowerCase())
+                );
+
+                // Find last seen line to avoid re-adding old tail lines
+                const lastIndex = lastSeen ? lines.lastIndexOf(lastSeen) : -1;
+                const startIdx = lastIndex >= 0 ? lastIndex + 1 : 0;
+                const newLines = lines.slice(startIdx);
+
+                const now = new Date();
+                const baseTime = now.getTime();
+
+                const newEntries: LogEntry[] = [];
+                newLines.forEach((line, idx) => {
+                    const lower = line.toLowerCase();
+
+                    // If backend sends the same SUCCESS message we already
+                    // injected, skip it to avoid duplicates.
+                    if (
+                        lower.includes('completed. ready to start') &&
+                        existingMessages.has('[success] completed. ready to start.')
+                    ) {
+                        return;
+                    }
+
+                    newEntries.push({
+                        id: `${serverId}-${baseTime + idx}-${Math.random()
+                            .toString(36)
+                            .slice(2, 6)}`,
+                        timestamp: now.toLocaleTimeString(),
+                        level: LogLevel.INFO,
+                        message: line,
+                    });
+                });
+
+                if (lines.length > 0) {
+                    lastLogTailRef.current[serverId] = lines[lines.length - 1];
+                }
+
+                const merged = [...existing, ...newEntries].slice(-400);
+                return { ...prev, [serverId]: merged };
+            });
         } catch (err) {
             console.error('Failed to fetch logs', err);
+            clearServerTimers(serverId);
         }
     };
 
@@ -243,6 +349,39 @@ const App: React.FC = () => {
         }
     };
 
+    const deleteServerInstance = (serverId: string) => {
+        const server = servers.find((s) => s.id === serverId);
+        clearServerTimers(serverId);
+
+        // Optimistic UI update: remove from UI immediately
+        setServers((prev) => prev.filter((s) => s.id !== serverId));
+        setServerStats((prev) => {
+            const next = { ...prev };
+            delete next[serverId];
+            return next;
+        });
+        setServerLogs((prev) => {
+            const next = { ...prev };
+            delete next[serverId];
+            return next;
+        });
+        if (activeServerId === serverId) {
+            setActiveServerId(null);
+        }
+
+        addNotifications([`Deleted server "${server?.name || serverId}".`]);
+
+        // Fire-and-forget API call
+        apiDeleteServer(serverId).catch((err: any) => {
+            addNotifications([
+                `Backend delete failed for "${server?.name || serverId}": ${
+                    err?.message || err
+                }`,
+            ]);
+        });
+    };
+
+
     const handleSendCommand = (serverId: string, command: string) => {
         const trimmed = command.trim();
         if (!trimmed) return;
@@ -261,21 +400,35 @@ const App: React.FC = () => {
     }, []);
 
     useEffect(() => {
+        // Reset all intervals when selection changes
         Object.values(logIntervalsRef.current).forEach((id) => clearInterval(id));
         Object.values(statIntervalsRef.current).forEach((id) => clearInterval(id));
-        if (activeServerId) {
-            fetchAndUpdateStatus(activeServerId);
-            fetchAndUpdateLogs(activeServerId);
-            statIntervalsRef.current[activeServerId] = window.setInterval(
-                () => fetchAndUpdateStatus(activeServerId),
+        logIntervalsRef.current = {};
+        statIntervalsRef.current = {};
+
+        if (!activeServerId) {
+            return;
+        }
+
+        const active = servers.find((s) => s.id === activeServerId);
+        if (!active) {
+            return;
+        }
+
+        // Fetch/poll when the server is running, starting, or preparing (to show prep logs)
+        if (active.status === 'ONLINE' || active.status === 'STARTING' || active.status === 'PREPARING') {
+            fetchAndUpdateStatus(active.id);
+            fetchAndUpdateLogs(active.id);
+            statIntervalsRef.current[active.id] = window.setInterval(
+                () => fetchAndUpdateStatus(active.id),
                 6000
             );
-            logIntervalsRef.current[activeServerId] = window.setInterval(
-                () => fetchAndUpdateLogs(activeServerId),
+            logIntervalsRef.current[active.id] = window.setInterval(
+                () => fetchAndUpdateLogs(active.id),
                 5000
             );
         }
-    }, [activeServerId]);
+    }, [activeServerId, servers]);
 
     const addNotifications = (messages: string[]) => {
         if (!messages.length) return;
@@ -324,13 +477,27 @@ const App: React.FC = () => {
                 port: nextPort,
                 ram_gb: 4,
             });
+
             const mapped = mapInstanceToServer(created);
-            setServers((prev) => [...prev, mapped]);
-            ensureServerStats(mapped);
-            addNotifications([`Created server "${mapped.name}" for ${modpack.title}.`]);
-            setActiveServerId(mapped.id);
+            lastStatusRef.current[mapped.id] = mapped.status;
+            const serverWithPreparing: Server = {
+                ...mapped,
+                status: 'PREPARING',
+            };
+
+            setServers((prev) => [...prev, serverWithPreparing]);
+            ensureServerStats(serverWithPreparing);
+            addNotifications([`Created server "${serverWithPreparing.name}" for ${modpack.title}.`]);
+
+            setActiveServerId(serverWithPreparing.id);
             setCurrentView(View.DASHBOARD);
-            appendLog(mapped.id, 'Server created. Click start to launch.', LogLevel.INFO);
+
+            appendLog(
+                serverWithPreparing.id,
+                'Server created. Preparing (downloading mods)...',
+                LogLevel.INFO
+            );
+            // polling for status & logs will be handled by the [activeServerId, servers] effect
         } catch (err: any) {
             addNotifications([`Failed to create server: ${err?.message || err}`]);
         }
@@ -472,6 +639,7 @@ const App: React.FC = () => {
                         onUpdateServer={updateServer}
                         onStartServer={startServer}
                         onStopServer={stopServer}
+                        onDeleteServer={deleteServerInstance}
                     />
                 );
             case View.SETTINGS:

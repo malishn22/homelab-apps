@@ -205,12 +205,12 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                                 {modpack.title}
                                 {modpack.serverSide ? (
                                     (modpack.serverSide || '').toLowerCase() === 'unsupported' ? (
-                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-500/10 text-red-300 border border-red-500/30 text-[11px] uppercase tracking-wide">
-                                            <X size={12} /> Client only
+                                        <span className="inline-flex items-center gap-1 px-2 py-[2px] rounded-full bg-red-500/10 text-red-300 border border-red-500/30 text-[9px] leading-none uppercase tracking-wide">
+                                            <X size={10} /> Client only
                                         </span>
                                     ) : (
-                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 text-[11px] uppercase tracking-wide">
-                                            <CheckCircle2 size={12} /> Server Exist
+                                        <span className="inline-flex items-center gap-1 px-2 py-[2px] rounded-full border border-emerald-500/50 text-emerald-300 bg-transparent text-[9px] leading-none uppercase tracking-wide">
+                                            <CheckCircle2 size={10} /> Server Exist
                                         </span>
                                     )
                                 ) : null}
@@ -219,15 +219,14 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                         </div>
                         <div className="flex items-center gap-3">
                             {loading && <span className="text-text-dim text-xs">Loading…</span>}
-                            {serverCheckComplete && (
-                                <span
-                                    className={`px-3 py-1 rounded-full text-xs font-semibold border ${
-                                        serverAvailable
-                                            ? 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
-                                            : 'text-red-300 border-red-500/40 bg-red-500/10'
-                                    }`}
-                                >
-                                    {serverAvailable ? 'Server Exist' : 'No server pack'}
+                            {serverAvailable && (
+                                <span className="inline-flex items-center gap-1 px-2 py-[2px] rounded-full border border-emerald-500/50 text-emerald-300 bg-transparent text-[9px] leading-none uppercase tracking-wide">
+                                    <CheckCircle2 size={10} /> Server Exist
+                                </span>
+                            )}
+                            {!serverAvailable && serverCheckComplete && (
+                                <span className="px-3 py-1 rounded-full text-xs font-semibold border text-red-300 border-red-500/40 bg-red-500/10">
+                                    No server pack
                                 </span>
                             )}
                             <button
@@ -341,18 +340,10 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                         <p className="text-text-muted text-sm mb-4">
                             Choose a server build version to prepare installation. (Install flow coming next.)
                         </p>
-                        {serverCheckComplete && (
-                            <div
-                                className={`flex items-center gap-2 mb-3 text-sm ${
-                                    serverAvailable ? 'text-emerald-400' : 'text-red-400'
-                                }`}
-                            >
-                                {serverAvailable ? <CheckCircle2 size={16} /> : <X size={16} />}
-                                <span>
-                                    {serverAvailable
-                                        ? 'Server pack detected. You can continue.'
-                                        : 'No server pack available for this modpack/version.'}
-                                </span>
+                        {serverCheckComplete && !serverAvailable && (
+                            <div className="flex items-center gap-2 mb-3 text-sm text-red-400">
+                                <X size={16} />
+                                <span>No server pack available for this modpack/version.</span>
                             </div>
                         )}
 
@@ -390,22 +381,13 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                                                     <div className="text-white font-semibold">
                                                         {ver.versionNumber || 'Unknown version'}
                                                     </div>
-                                                    <div className="flex items-center gap-2">
-                                                    {supported ? (
-                                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                                                            Server Exist
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/15 text-red-300 border border-red-500/30">
-                                                            Client only
-                                                        </span>
-                                                    )}
                                                     {isActive && supported && (
-                                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30">
-                                                            Selected
-                                                        </span>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30">
+                                                                Selected
+                                                            </span>
+                                                        </div>
                                                     )}
-                                                    </div>
                                                 </div>
                                                 <div className="flex items-center justify-between text-[11px] text-text-dim mt-1 gap-2 flex-wrap">
                                                     <span className="text-text-muted">
@@ -414,10 +396,6 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                                                     <div className="flex items-center gap-2">
                                                         <span>
                                                             {(ver.gameVersions || []).join(', ') || 'No game versions'}
-                                                        </span>
-                                                        <span className="flex items-center gap-1 text-emerald-400">
-                                                            <CheckCircle2 size={12} />
-                                                            Server pack
                                                         </span>
                                                     </div>
                                                 </div>

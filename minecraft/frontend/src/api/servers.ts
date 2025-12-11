@@ -1,94 +1,80 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+const API_BASE = '/api';
+const build = (path: string) => `${API_BASE}${path}`;
 
-const buildApiUrl = (path: string) => {
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  return `${API_BASE_URL}${normalizedPath}`;
-};
-
-export type ServerInstance = {
-  id: string;
+export type CreateServerPayload = {
   name: string;
   project_id: string;
   version_id: string;
-  version_number?: string;
-  loader?: string;
+  version_number: string;
+  loader: string;
   port: number;
   ram_gb: number;
-  status: string;
-  container_name?: string;
 };
 
-export type ServerStatus = {
-  status: string;
-  stats?: {
-    ramUsage: number;
-    ramTotal: number;
-    cpuLoad: number;
-    tps: number;
-  };
-};
-
-export async function listServers(): Promise<ServerInstance[]> {
-  const res = await fetch(buildApiUrl('/api/servers'));
-  if (!res.ok) throw new Error(`Failed to list servers (${res.status})`);
-  const data = await res.json();
-  return Array.isArray(data?.items) ? data.items : [];
+async function handleJson<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API error ${res.status}: ${text || res.statusText}`);
+  }
+  return res.json() as Promise<T>;
 }
 
-export async function createServer(payload: {
-  name: string;
-  project_id: string;
-  version_id: string;
-  version_number?: string;
-  loader?: string;
-  port: number;
-  ram_gb: number;
-}): Promise<ServerInstance> {
-  const res = await fetch(buildApiUrl('/api/servers'), {
+export async function listServers(): Promise<any[]> {
+  const res = await fetch(build('/servers'), { method: 'GET' });
+  const data = await handleJson<{ items: any[] }>(res);
+  return data.items || [];
+}
+
+export async function createServer(payload: CreateServerPayload): Promise<any> {
+  const res = await fetch(build('/servers'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
+  return handleJson<any>(res);
+}
+
+export async function startServer(id: string): Promise<any> {
+  const res = await fetch(build(`/servers/${id}/start`), { method: 'POST' });
+  return handleJson<any>(res);
+}
+
+export async function stopServer(id: string): Promise<any> {
+  const res = await fetch(build(`/servers/${id}/stop`), { method: 'POST' });
+  return handleJson<any>(res);
+}
+
+export async function deleteServer(id: string): Promise<void> {
+  const res = await fetch(build(`/servers/${id}/delete`), {
+    method: 'POST',
+  });
+
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Failed to create server (${res.status}): ${body}`);
+    const text = await res.text();
+    throw new Error(`Delete failed ${res.status}: ${text || res.statusText}`);
   }
-  return await res.json();
 }
 
-export async function startServer(serverId: string): Promise<{ status: string }> {
-  const res = await fetch(buildApiUrl(`/api/servers/${serverId}/start`), { method: 'POST' });
-  if (!res.ok) throw new Error(`Failed to start server (${res.status})`);
-  return await res.json();
+
+export async function fetchLogs(id: string, lines: number): Promise<string[]> {
+  const res = await fetch(build(`/servers/${id}/logs?lines=${lines}`), {
+    method: 'GET',
+  });
+  const data = await handleJson<{ lines: string[] }>(res);
+  return data.lines || [];
 }
 
-export async function stopServer(serverId: string): Promise<{ status: string }> {
-  const res = await fetch(buildApiUrl(`/api/servers/${serverId}/stop`), { method: 'POST' });
-  if (!res.ok) throw new Error(`Failed to stop server (${res.status})`);
-  return await res.json();
+export async function fetchStatus(id: string): Promise<any> {
+  // backend exposes both /{id} and /{id}/status; use the explicit one
+  const res = await fetch(build(`/servers/${id}/status`), { method: 'GET' });
+  return handleJson<any>(res);
 }
 
-export async function fetchStatus(serverId: string): Promise<ServerStatus> {
-  const res = await fetch(buildApiUrl(`/api/servers/${serverId}/status`));
-  if (!res.ok) throw new Error(`Failed to fetch status (${res.status})`);
-  return await res.json();
-}
-
-export async function fetchLogs(serverId: string, tail = 200): Promise<string[]> {
-  const res = await fetch(buildApiUrl(`/api/servers/${serverId}/logs?tail=${tail}`));
-  if (!res.ok) throw new Error(`Failed to fetch logs (${res.status})`);
-  const data = await res.json();
-  return Array.isArray(data?.lines) ? data.lines : [];
-}
-
-export async function sendCommand(serverId: string, command: string): Promise<void> {
-  const res = await fetch(buildApiUrl(`/api/servers/${serverId}/command`), {
+export async function sendCommand(id: string, command: string): Promise<any> {
+  const res = await fetch(build(`/servers/${id}/command`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ command }),
   });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Failed to send command (${res.status}): ${body}`);
-  }
+  return handleJson<any>(res);
 }
