@@ -19,7 +19,7 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
         ramUsage: server?.ramUsage ?? 0,
         ramTotal: server?.ramLimit ?? 0,
         cpuLoad: 0,
-        tps: 0,
+        tps: null,
         status: (server?.status as ServerStats['status']) || 'OFFLINE',
     };
 
@@ -30,12 +30,31 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
     const isOnline = server?.status === 'ONLINE';
     const isStarting = server?.status === 'STARTING';
     const isPreparing = server?.status === 'PREPARING';
-    const ramPercent = effectiveStats.ramTotal > 0 ? Math.min(100, (effectiveStats.ramUsage / effectiveStats.ramTotal) * 100) : 0;
+    const ramPercent =
+        effectiveStats.ramTotal > 0
+            ? Math.min(100, (effectiveStats.ramUsage / effectiveStats.ramTotal) * 100)
+            : 0;
+    const tickTimeValue =
+        typeof effectiveStats.tickTimeMs === 'number' ? effectiveStats.tickTimeMs : null;
+    const tickDisplay = Number.isFinite(tickTimeValue) ? `${tickTimeValue!.toFixed(1)} ms` : '--';
+    const tickPercent = tickTimeValue ? Math.min(100, (tickTimeValue / 50) * 100) : 0;
+    const tickBarClass =
+        tickTimeValue === null
+            ? 'bg-zinc-600'
+            : tickTimeValue < 25
+            ? 'bg-emerald-400'
+            : tickTimeValue < 40
+            ? 'bg-yellow-400'
+            : 'bg-red-400';
     const statusColor =
         effectiveStats.status === 'ONLINE'
             ? 'text-emerald-400'
             : effectiveStats.status === 'STARTING'
             ? 'text-yellow-300'
+            : effectiveStats.status === 'PREPARING'
+            ? 'text-sky-300'
+            : effectiveStats.status === 'ERROR'
+            ? 'text-red-400'
             : effectiveStats.status === 'MAINTENANCE'
             ? 'text-red-400'
             : 'text-text-muted';
@@ -44,6 +63,10 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
             ? 'bg-emerald-500'
             : effectiveStats.status === 'STARTING'
             ? 'bg-yellow-400'
+            : effectiveStats.status === 'PREPARING'
+            ? 'bg-sky-400'
+            : effectiveStats.status === 'ERROR'
+            ? 'bg-red-500'
             : effectiveStats.status === 'MAINTENANCE'
             ? 'bg-red-500'
             : 'bg-zinc-500';
@@ -175,7 +198,11 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
                             <HardDrive size={14} /> RAM Usage
                         </div>
                         <div className="flex items-baseline gap-2">
-                            <span className="text-3xl font-bold text-white">{effectiveStats.ramUsage.toFixed(1)}</span>
+                            <span className="text-3xl font-bold text-white">
+                                {Number.isFinite(effectiveStats.ramUsage)
+                                    ? effectiveStats.ramUsage.toFixed(1)
+                                    : '0.0'}
+                            </span>
                             <span className="text-sm text-text-muted">/ {effectiveStats.ramTotal} GB</span>
                         </div>
                         <div className="w-full bg-bg-body/50 h-1.5 mt-4 rounded-full overflow-hidden">
@@ -195,7 +222,11 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
                             <Cpu size={14} /> CPU Load
                         </div>
                         <div className="flex items-baseline gap-2">
-                            <span className="text-3xl font-bold text-white">{effectiveStats.cpuLoad.toFixed(0)}</span>
+                            <span className="text-3xl font-bold text-white">
+                                {Number.isFinite(effectiveStats.cpuLoad)
+                                    ? effectiveStats.cpuLoad.toFixed(0)
+                                    : '0'}
+                            </span>
                             <span className="text-sm text-text-muted">%</span>
                         </div>
                         <div className="w-full bg-bg-body/50 h-1.5 mt-4 rounded-full overflow-hidden">
@@ -220,9 +251,17 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
                                 {effectiveStats.status}
                             </div>
                         </div>
-                        <div className="text-right">
-                            <div className="text-text-muted text-xs font-bold uppercase tracking-wider mb-1">TPS</div>
-                            <div className="text-xl font-bold text-white">{effectiveStats.tps.toFixed(1)}</div>
+                    </div>
+                    <div className="mt-4">
+                        <div className="flex items-center justify-between text-[11px] text-text-muted">
+                            <span>Tick Time</span>
+                            <span className="text-white">{tickDisplay}</span>
+                        </div>
+                        <div className="w-full bg-bg-body/50 h-1.5 mt-2 rounded-full overflow-hidden">
+                            <div
+                                className={`h-full transition-all duration-500 ${tickBarClass}`}
+                                style={{ width: `${tickPercent}%` }}
+                            ></div>
                         </div>
                     </div>
                 </div>

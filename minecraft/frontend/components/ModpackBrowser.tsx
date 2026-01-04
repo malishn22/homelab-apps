@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Modpack } from '../types';
-import { fetchTopModpacks, ModrinthModpack, refreshModpacks } from '../src/api/modpacks';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Modpack, ModpackSource } from '../types';
+import { ModrinthModpack, searchModpacks } from '../src/api/modpacks';
 import { Search, Download, Sparkles, Users, Clock, RefreshCcw, ServerCrash, Server as ServerIcon, ChevronLeft, ChevronRight, CheckCircle2 } from 'lucide-react';
 
 const formatDownloads = (downloads?: number): string => {
@@ -100,6 +100,7 @@ const mapApiHitToModpack = (hit: ModrinthModpack, idx: number): Modpack => ({
     loaders: hit.loaders || [],
     serverSide: (hit.server_side || '').toLowerCase() || 'unsupported',
     imageUrl: hit.icon_url || `https://api.dicebear.com/7.x/shapes/svg?seed=${hit.slug || idx}`,
+    source: (hit.source as ModpackSource) || 'modrinth',
 });
 
 const mapModrinthToModpacks = (items: ModrinthModpack[]): Modpack[] =>
@@ -110,91 +111,118 @@ interface ModpackBrowserProps {
     onAddNotifications?: (messages: string[]) => void;
 }
 
-type SortMode = 'downloads' | 'updated' | 'title-asc' | 'title-desc';
+type SortMode = 'downloads' | 'updated' | 'relevance' | 'follows';
+type SourceFilterOption = {
+    key: ModpackSource;
+    label: string;
+    dotClass: string;
+};
 
-const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifications }) => {
-    const topLimit = 100;
+const SOURCE_FILTERS: SourceFilterOption[] = [
+    { key: 'modrinth', label: 'Modrinth', dotClass: 'bg-violet-400' },
+    { key: 'curseforge', label: 'CurseForge', dotClass: 'bg-amber-400' },
+];
+
+const SOURCE_BADGES: Record<
+    ModpackSource,
+    { label: string; className: string }
+> = {
+    modrinth: {
+        label: 'Modrinth',
+        className: 'bg-violet-500/15 border-violet-400/40 text-violet-200',
+    },
+    curseforge: {
+        label: 'CurseForge',
+        className: 'bg-amber-500/15 border-amber-400/40 text-amber-200',
+    },
+    ftb: {
+        label: 'FTB',
+        className: 'bg-emerald-500/15 border-emerald-400/40 text-emerald-200',
+    },
+};
+
+const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifications: _onAddNotifications }) => {
     const [modpacks, setModpacks] = useState<Modpack[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
+    const [debouncedQuery, setDebouncedQuery] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [isRefreshing, setIsRefreshing] = useState(false);
-    const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
+    const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [sortMode, setSortMode] = useState<SortMode>('downloads');
     const [page, setPage] = useState(1);
-    const [pageSize, setPageSize] = useState(20);
+    const [pageSize, setPageSize] = useState(50);
     const [serverFilter, setServerFilter] = useState<'all' | 'server' | 'client'>('all');
+    const [selectedSources, setSelectedSources] = useState<ModpackSource[]>(['modrinth', 'curseforge']);
+    const [totalHits, setTotalHits] = useState(0);
+    const [reloadToken, setReloadToken] = useState(0);
+    const forceRefreshRef = useRef(false);
 
-    const loadTopModpacks = useCallback(async () => {
-        const response = await fetchTopModpacks(topLimit);
-        return response;
-    }, [topLimit]);
+    useEffect(() => {
+        const timer = setTimeout(() => setDebouncedQuery(searchQuery.trim()), 250);
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
 
     useEffect(() => {
         let isMounted = true;
+        setIsLoading(true);
+        setError(null);
 
-        const fetchTop = async () => {
-            setIsLoading(true);
-            setError(null);
+        const fetchSearchResults = async () => {
             try {
-                const resp = await loadTopModpacks();
+                const forceRefresh = forceRefreshRef.current;
+                const resp = await searchModpacks({
+                    query: debouncedQuery,
+                    page: Math.max(0, page - 1),
+                    limit: pageSize,
+                    sort: sortMode,
+                    sources: selectedSources,
+                    force: forceRefresh,
+                });
                 if (!isMounted) return;
-                const items = Array.isArray(resp.items) ? resp.items : [];
-                setModpacks(mapModrinthToModpacks(items));
-                setLastRefreshed(resp.refreshed_at ?? null);
+                const hits = Array.isArray(resp.hits) ? resp.hits : [];
+                setModpacks(mapModrinthToModpacks(hits));
+                const total = typeof resp.total_hits === 'number' ? resp.total_hits : hits.length;
+                setTotalHits(total);
+                setLastFetchedAt(new Date().toISOString());
+                if (forceRefresh) {
+                    forceRefreshRef.current = false;
+                }
             } catch (err: any) {
                 if (!isMounted) return;
                 setError(err?.message || 'Failed to load modpacks.');
+                setModpacks([]);
+                setTotalHits(0);
             } finally {
-                if (!isMounted) return;
-                setIsLoading(false);
+                if (isMounted) {
+                    setIsLoading(false);
+                }
             }
         };
 
-        fetchTop();
+        fetchSearchResults();
+
         return () => {
             isMounted = false;
         };
-    }, [loadTopModpacks]);
+    }, [debouncedQuery, page, pageSize, sortMode, reloadToken, selectedSources]);
 
-    const handleRefreshClick = async () => {
-        const prevById = new Map(modpacks.map((p) => [p.id, p]));
-        setIsRefreshing(true);
-        setError(null);
-        try {
-            const resp = await refreshModpacks(topLimit);
-            const items = Array.isArray(resp.items) ? resp.items : [];
-            const mapped = mapModrinthToModpacks(items);
-            setModpacks(mapped);
-            setLastRefreshed(resp.refreshed_at ?? new Date().toISOString());
-            setPage(1);
-
-            if (onAddNotifications) {
-                const updatedMods = mapped.filter((p) => {
-                    const prev = prevById.get(p.id);
-                    return prev && prev.updatedAt !== p.updatedAt;
-                });
-                if (updatedMods.length) {
-                    onAddNotifications(updatedMods.map((p) => `${p.title} updated.`));
-                }
-            }
-        } catch (err: any) {
-            setError(err?.message || 'Failed to refresh modpacks.');
-        } finally {
-            setIsRefreshing(false);
-        }
+    const handleRefreshClick = () => {
+        forceRefreshRef.current = true;
+        setReloadToken((token) => token + 1);
+        setPage(1);
     };
 
     useEffect(() => {
         setPage(1);
-    }, [searchQuery, sortMode, modpacks.length, pageSize, serverFilter]);
+    }, [debouncedQuery, sortMode, pageSize, serverFilter, selectedSources]);
 
     const filteredPacks = useMemo(() => {
-        const q = searchQuery.toLowerCase();
+        const activeSources = new Set(selectedSources);
         const filtered = modpacks.filter((pack) => {
-            const matchesText =
-                pack.title.toLowerCase().includes(q) || pack.description.toLowerCase().includes(q);
-            if (!matchesText) return false;
+            const packSource = (pack.source || 'modrinth') as ModpackSource;
+            if (activeSources.size > 0 && !activeSources.has(packSource)) {
+                return false;
+            }
             const serverSide = (pack.serverSide || '').toLowerCase() || 'unsupported';
             if (serverFilter === 'server') {
                 return serverSide !== 'unsupported';
@@ -204,37 +232,24 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
             }
             return true;
         });
+        return filtered;
+    }, [modpacks, serverFilter, selectedSources]);
 
-        const sorted = [...filtered].sort((a, b) => {
-            switch (sortMode) {
-                case 'downloads': {
-                    const da = a.downloadsCount ?? 0;
-                    const db = b.downloadsCount ?? 0;
-                    if (db !== da) return db - da;
-                    return a.title.localeCompare(b.title);
-                }
-                case 'updated': {
-                    const ta = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-                    const tb = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-                    if (tb !== ta) return tb - ta;
-                    return a.title.localeCompare(b.title);
-                }
-                case 'title-asc':
-                    return a.title.localeCompare(b.title);
-                case 'title-desc':
-                    return b.title.localeCompare(a.title);
-                default:
-                    return 0;
+    const toggleSource = (source: ModpackSource) => {
+        setSelectedSources((prev) => {
+            const isActive = prev.includes(source);
+            if (isActive) {
+                return prev.length > 1 ? prev.filter((item) => item !== source) : prev;
             }
+            return [...prev, source];
         });
-
-        return sorted;
-    }, [modpacks, searchQuery, sortMode, serverFilter]);
+    };
 
     const totalPages = useMemo(() => {
-        const total = Math.ceil(filteredPacks.length / pageSize);
-        return total > 0 ? total : 1;
-    }, [filteredPacks.length, pageSize]);
+        const total = totalHits || filteredPacks.length;
+        const pages = Math.ceil(total / pageSize);
+        return pages > 0 ? pages : 1;
+    }, [filteredPacks.length, pageSize, totalHits]);
 
     useEffect(() => {
         if (page > totalPages) {
@@ -242,10 +257,7 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
         }
     }, [page, totalPages]);
 
-    const pagedPacks = useMemo(() => {
-        const start = (page - 1) * pageSize;
-        return filteredPacks.slice(start, start + pageSize);
-    }, [filteredPacks, page, pageSize]);
+    const pagedPacks = filteredPacks;
 
     return (
         <div className="h-full flex flex-col p-2">
@@ -256,20 +268,22 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
                         Modpack Library
                     </h2>
                     <p className="text-text-muted">
-                        Served from your cached modpack database. Refresh to sync with Modrinth.
+                        Live modpack search proxied by your backend (5 min in-memory cache).
                     </p>
                 </div>
                 <div className="flex flex-col items-end gap-1">
                     <button
                         onClick={handleRefreshClick}
-                        disabled={isRefreshing || isLoading}
+                        disabled={isLoading}
                         className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-primary/30 bg-primary/10 text-primary hover:bg-primary/15 hover:border-primary/50 transition-all disabled:opacity-60 disabled:cursor-not-allowed shadow-[0_0_20px_rgba(88,28,135,0.12)]"
                     >
-                        <RefreshCcw size={16} className={isRefreshing ? 'animate-spin' : ''} />
-                        {isRefreshing ? 'Refreshing...' : 'Refresh Mods'}
+                        <RefreshCcw size={16} className={isLoading ? 'animate-spin' : ''} />
+                        {isLoading ? 'Loading...' : 'Refresh search'}
                     </button>
                     <div className="text-[11px] text-text-dim">
-                        {lastRefreshed ? `Refreshed ${formatRefreshedAt(lastRefreshed)}` : ''}
+                        {lastFetchedAt
+                            ? `Fetched ${formatRefreshedAt(lastFetchedAt)} (cached ≤5m)`
+                            : 'First fetch may take a moment.'}
                     </div>
                 </div>
             </div>
@@ -278,7 +292,7 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
                 <div className="flex flex-col lg:flex-row gap-6">
                     <div className="flex-1 min-w-0 space-y-4">
                         {isLoading && (
-                            <div className="glass-panel rounded-2xl p-6 text-text-muted">Fetching top modpacks...</div>
+                            <div className="glass-panel rounded-2xl p-6 text-text-muted">Fetching modpacks...</div>
                         )}
 
                         {error && (
@@ -305,6 +319,17 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
                                             <div className="flex items-center gap-2 flex-wrap">
                                                 <h3 className="font-bold text-lg text-white truncate flex items-center gap-2">
                                                     {pack.title}
+                                                    {(() => {
+                                                        const sourceKey = (pack.source || 'modrinth') as ModpackSource;
+                                                        const sourceBadge = SOURCE_BADGES[sourceKey];
+                                                        return sourceBadge ? (
+                                                            <span
+                                                                className={`inline-flex items-center gap-1 px-2 py-[2px] rounded-full border text-[9px] leading-none uppercase tracking-wide ${sourceBadge.className}`}
+                                                            >
+                                                                {sourceBadge.label}
+                                                            </span>
+                                                        ) : null;
+                                                    })()}
                                                     {pack.serverSide ? (
                                                         (pack.serverSide || '').toLowerCase() === 'unsupported' ? (
                                                             <span className="inline-flex items-center gap-1 px-2 py-[2px] rounded-full bg-red-500/10 text-red-300 border border-red-500/30 text-[9px] leading-none uppercase tracking-wide">
@@ -441,7 +466,7 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
                                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-primary" size={20} />
                                 <input 
                                     type="text" 
-                                    placeholder="Search within the top list..." 
+                                    placeholder="Search modpacks..." 
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     className="w-full bg-bg-surface/50 border border-border-main rounded-xl py-3 pl-12 pr-4 text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all placeholder:text-text-dim"
@@ -453,9 +478,9 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                     {[
                                         { key: 'downloads', label: 'Most Downloaded' },
+                                        { key: 'relevance', label: 'Relevance' },
                                         { key: 'updated', label: 'Recently Updated' },
-                                        { key: 'title-asc', label: 'Title A → Z' },
-                                        { key: 'title-desc', label: 'Title Z → A' },
+                                        { key: 'follows', label: 'Most Followed' },
                                     ].map((opt) => (
                                         <button
                                             key={opt.key}
@@ -469,6 +494,32 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
                                             {opt.label}
                                         </button>
                                     ))}
+                                </div>
+                            </div>
+
+                            <div className="space-y-3">
+                                <div className="text-xs uppercase tracking-wide text-text-dim">Sources</div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    {SOURCE_FILTERS.map((opt) => {
+                                        const isActive = selectedSources.includes(opt.key);
+                                        return (
+                                            <button
+                                                key={opt.key}
+                                                onClick={() => toggleSource(opt.key)}
+                                                aria-pressed={isActive}
+                                                className={`w-full text-left px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
+                                                    isActive
+                                                        ? 'border-primary/60 bg-primary/15 text-primary shadow-[0_0_0_1px_rgba(129,140,248,0.25)]'
+                                                        : 'border-border-main bg-bg-surface/60 text-text-muted hover:border-primary/30 hover:text-white'
+                                                }`}
+                                            >
+                                                <span className="inline-flex items-center gap-2">
+                                                    <span className={`h-2 w-2 rounded-full ${opt.dotClass}`} />
+                                                    {opt.label}
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
                                 </div>
                             </div>
 

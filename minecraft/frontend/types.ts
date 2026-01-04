@@ -36,7 +36,10 @@ export interface Modpack {
   loaders?: string[];
   gameVersions?: string[];
   serverSide?: string;
+  source?: ModpackSource;
 }
+
+export type ModpackSource = 'modrinth' | 'curseforge' | 'ftb';
 
 export interface ServerVersionOption {
   id?: string;
@@ -61,8 +64,9 @@ export interface ServerStats {
   ramUsage: number; // in GB
   ramTotal: number; // in GB
   cpuLoad: number; // percentage
-  tps: number; // ticks per second
-  status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'STOPPING' | 'MAINTENANCE' | 'PREPARING';
+  tps: number | null; // ticks per second
+  tickTimeMs?: number | null;
+  status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'STOPPING' | 'MAINTENANCE' | 'PREPARING' | 'ERROR';
 }
 
 export interface Server {
@@ -71,7 +75,7 @@ export interface Server {
     type: string;
     version: string;
     port: number;
-    status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'MAINTENANCE' | 'PREPARING';
+    status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'MAINTENANCE' | 'PREPARING' | 'ERROR';
     players: number;
     maxPlayers: number;
     ramUsage: number;

@@ -31,6 +31,7 @@ const ServerList: React.FC<ServerListProps> = ({
             case 'OFFLINE': return 'bg-zinc-500';
             case 'STARTING': return 'bg-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.4)]';
             case 'PREPARING': return 'bg-blue-400 shadow-[0_0_10px_rgba(96,165,250,0.4)]';
+            case 'ERROR': return 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.4)]';
             case 'MAINTENANCE': return 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.4)]';
             default: return 'bg-zinc-500';
         }

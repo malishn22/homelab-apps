@@ -129,7 +129,8 @@ const App: React.FC = () => {
                     ramUsage: 0,
                     ramTotal: server.ramLimit,
                     cpuLoad: 0,
-                    tps: 0,
+                    tps: null,
+                    tickTimeMs: null,
                     status: server.status as ServerStats['status'],
                 },
             };
@@ -169,7 +170,14 @@ const App: React.FC = () => {
                     ramUsage: stats.ramUsage ?? prev[serverId]?.ramUsage ?? 0,
                     ramTotal: stats.ramTotal ?? prev[serverId]?.ramTotal ?? 0,
                     cpuLoad: stats.cpuLoad ?? prev[serverId]?.cpuLoad ?? 0,
-                    tps: stats.tps ?? prev[serverId]?.tps ?? 0,
+                    tps:
+                        typeof stats.tps === 'number'
+                            ? stats.tps
+                            : prev[serverId]?.tps ?? null,
+                    tickTimeMs:
+                        typeof stats.tickTimeMs === 'number'
+                            ? stats.tickTimeMs
+                            : prev[serverId]?.tickTimeMs ?? null,
                     status: status as ServerStats['status'],
                 },
             }));
@@ -222,7 +230,8 @@ const App: React.FC = () => {
                     ramUsage: prev[serverId]?.ramUsage ?? 0,
                     ramTotal: prev[serverId]?.ramTotal ?? 0,
                     cpuLoad: prev[serverId]?.cpuLoad ?? 0,
-                    tps: prev[serverId]?.tps ?? 0,
+                    tps: prev[serverId]?.tps ?? null,
+                    tickTimeMs: prev[serverId]?.tickTimeMs ?? null,
                     status: 'OFFLINE',
                 },
             }));
@@ -338,7 +347,8 @@ const App: React.FC = () => {
                         ramUsage: 0,
                         ramTotal: server.ramLimit,
                         cpuLoad: 0,
-                        tps: 0,
+                        tps: null,
+                        tickTimeMs: null,
                         status: 'OFFLINE',
                     },
                 };
@@ -457,6 +467,7 @@ const App: React.FC = () => {
     const handleInstallRequest = async (modpack: Modpack, options?: InstallRequestOptions) => {
         const versionLabel = options?.versionNumber || modpack.updatedAt || 'latest';
         const loaderLabel = options?.loaders?.[0] || modpack.loaders?.[0] || 'Unknown';
+        const sourceLabel = modpack.source || 'modrinth';
         const baseName = options?.serverName || `${modpack.title} Server`;
         const versionId = options?.versionId;
 
@@ -474,6 +485,7 @@ const App: React.FC = () => {
                 version_id: versionId,
                 version_number: versionLabel,
                 loader: loaderLabel,
+                source: sourceLabel,
                 port: nextPort,
                 ram_gb: 4,
             });
@@ -577,6 +589,10 @@ const App: React.FC = () => {
                             setSelectedModpack(modpack);
                             setDetailError(null);
                             setIsLoadingDetail(true);
+                            if (modpack.source && modpack.source !== 'modrinth') {
+                                setIsLoadingDetail(false);
+                                return;
+                            }
                             try {
                                 const resp = await fetch(`/api/modpacks/${modpack.id}`);
                                 if (!resp.ok) {

@@ -23,6 +23,7 @@ export type ModrinthModpack = {
   loaders?: string[];
   refreshed_at?: string;
   server_side?: string;
+  source?: 'modrinth' | 'curseforge' | 'ftb';
 };
 
 export type ServerVersion = {
@@ -40,35 +41,68 @@ export type ServerFilesResponse = {
   versions: ServerVersion[];
 };
 
-export type TopModpacksResponse = {
-  items?: ModrinthModpack[];
-  count?: number;
-  refreshed_at?: string;
+export type SearchModpacksResponse = {
+  hits: ModrinthModpack[];
+  limit?: number;
+  offset?: number;
+  total_hits?: number;
 };
 
-const parseTopResponse = async (res: Response): Promise<TopModpacksResponse> => {
+const parseSearchResponse = async (res: Response): Promise<SearchModpacksResponse> => {
   if (!res.ok) {
     throw new Error(`Failed to fetch modpacks: ${res.status}`);
   }
 
-  const data: TopModpacksResponse = await res.json();
-  return data;
+  const data = await res.json();
+  const hits = Array.isArray(data?.hits) ? data.hits : [];
+  return {
+    hits,
+    limit: data?.limit,
+    offset: data?.offset,
+    total_hits: data?.total_hits,
+  };
 };
 
-export async function fetchTopModpacks(limit = 5): Promise<TopModpacksResponse> {
-  const res = await fetch(buildApiUrl(`/api/modpacks/top?limit=${limit}`));
-  return parseTopResponse(res);
-}
-
-export async function refreshModpacks(limit = 25): Promise<TopModpacksResponse> {
-  const res = await fetch(buildApiUrl(`/api/modpacks/refresh?limit=${limit}`), {
-    method: 'POST',
+export async function searchModpacks(params?: {
+  query?: string;
+  page?: number;
+  limit?: number;
+  sort?: string;
+  sources?: string[];
+  force?: boolean;
+}): Promise<SearchModpacksResponse> {
+  const { query = '', page = 0, limit = 20, sort = 'relevance', sources = [], force = false } = params || {};
+  const searchParams = new URLSearchParams({
+    query,
+    page: String(page),
+    limit: String(limit),
+    sort,
   });
-  return parseTopResponse(res);
+  if (sources.length > 0) {
+    searchParams.set('sources', sources.join(','));
+  }
+  if (force) {
+    searchParams.set('force', 'true');
+  }
+
+  const res = await fetch(buildApiUrl(`/api/modpacks/search?${searchParams.toString()}`));
+  return parseSearchResponse(res);
 }
 
-export async function fetchServerFiles(projectId: string): Promise<ServerFilesResponse> {
-  const res = await fetch(buildApiUrl(`/api/modpacks/${projectId}/server-files`));
+export async function fetchServerFiles(
+  projectId: string,
+  source?: string,
+  force?: boolean
+): Promise<ServerFilesResponse> {
+  const params = new URLSearchParams();
+  if (source) {
+    params.set('source', source);
+  }
+  if (force) {
+    params.set('force', 'true');
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  const res = await fetch(buildApiUrl(`/api/modpacks/${projectId}/server-files${suffix}`));
   if (!res.ok) {
     throw new Error(`Failed to fetch server files: ${res.status}`);
   }

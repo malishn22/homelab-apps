@@ -7,6 +7,7 @@ export type CreateServerPayload = {
   version_id: string;
   version_number: string;
   loader: string;
+  source?: string;
   port: number;
   ram_gb: number;
 };
