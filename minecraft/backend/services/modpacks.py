@@ -8,7 +8,12 @@ import requests
 
 try:
     # Package import
-    from ..config import MODRINTH_BASE_URL, MODRINTH_USER_AGENT
+    from ..config import (
+        CURSEFORGE_API_KEY,
+        CURSEFORGE_BASE_URL,
+        MODRINTH_BASE_URL,
+        MODRINTH_USER_AGENT,
+    )
     from ..db import (
         init_db,
         save_modpacks,
@@ -27,7 +32,12 @@ except ImportError:  # script execution (python backend/services/modpacks.py)
 
     CURRENT_DIR = Path(__file__).resolve().parent.parent
     sys.path.append(str(CURRENT_DIR))
-    from config import MODRINTH_BASE_URL, MODRINTH_USER_AGENT  # type: ignore
+    from config import (  # type: ignore
+        CURSEFORGE_API_KEY,
+        CURSEFORGE_BASE_URL,
+        MODRINTH_BASE_URL,
+        MODRINTH_USER_AGENT,
+    )
     from db import (  # type: ignore
         init_db,
         save_modpacks,
@@ -190,11 +200,41 @@ def _choose_best_file(files: list[dict]) -> Optional[dict]:
     return sorted(server_files, key=key_fn)[0]
 
 
-def resolve_server_file_url(project_id: str, version_id: str) -> str:
+def _resolve_curseforge_server_file_url(project_id: str, version_id: str) -> str:
+    if not CURSEFORGE_BASE_URL or not CURSEFORGE_API_KEY:
+        raise ValueError("CurseForge API is not configured.")
+    try:
+        mod_id = int(project_id)
+        file_id = int(version_id)
+    except ValueError:
+        raise ValueError("CurseForge requires numeric mod_id and file_id.")
+
+    resp = requests.get(
+        f"{CURSEFORGE_BASE_URL}/mods/{mod_id}/files/{file_id}/download-url",
+        headers={"x-api-key": CURSEFORGE_API_KEY},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    url = data.get("data")
+    if not url:
+        raise ValueError("CurseForge did not return a download URL.")
+    return url
+
+
+def resolve_server_file_url(
+    project_id: str, version_id: str, source: Optional[str] = None
+) -> str:
     """
     Find a server-capable file URL for the given project/version. Prefers files
     with "server" in the filename, non-mrpack server archives, or marked primary.
     """
+    source_key = (source or "").strip().lower()
+    if source_key == "curseforge":
+        return _resolve_curseforge_server_file_url(project_id, version_id)
+    if project_id.isdigit() and source_key != "modrinth":
+        return _resolve_curseforge_server_file_url(project_id, version_id)
+
     cached = fetch_modpack_by_id(project_id)
     if cached and isinstance(cached.get("server_versions"), list):
         ver_match = next(

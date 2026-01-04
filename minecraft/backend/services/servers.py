@@ -42,13 +42,17 @@ def list_server_instances() -> Dict:
 
 
 def create_server_instance(req: CreateServerRequest) -> Dict:
-    file_url = resolve_server_file_url(req.project_id, req.version_id)
+    source_key = (req.source or "").strip().lower()
+    if not source_key and req.project_id.isdigit():
+        source_key = "curseforge"
+    file_url = resolve_server_file_url(req.project_id, req.version_id, source_key or None)
     instance = create_instance(
         name=req.name,
         project_id=req.project_id,
         version_id=req.version_id,
         version_number=req.version_number,
         loader=req.loader,
+        source=source_key or None,
         port=req.port,
         ram_gb=req.ram_gb,
         file_url=file_url,
