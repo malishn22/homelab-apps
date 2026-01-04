@@ -10,7 +10,12 @@ import uvicorn
 
 # Try package-style imports first (backend.main)
 try:
-    from .config import validate_modrinth_settings
+    from .config import (
+        CURSEFORGE_API_KEY,
+        CURSEFORGE_BASE_URL,
+        validate_curseforge_settings,
+        validate_modrinth_settings,
+    )
     from .db import init_db
     from .api.modpacks import router as modpacks_router
     from .api.servers import router as servers_router
@@ -22,7 +27,12 @@ except ImportError:
     if str(BASE_DIR) not in sys.path:
         sys.path.append(str(BASE_DIR))
 
-    from config import validate_modrinth_settings  # type: ignore
+    from config import (  # type: ignore
+        CURSEFORGE_API_KEY,
+        CURSEFORGE_BASE_URL,
+        validate_curseforge_settings,
+        validate_modrinth_settings,
+    )
     from db import init_db  # type: ignore
     from api.modpacks import router as modpacks_router  # type: ignore
     from api.servers import router as servers_router  # type: ignore
@@ -42,10 +52,12 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup() -> None:
     """
-    Validate config and initialize DB on process start.
+    Validate config on process start.
     """
-    validate_modrinth_settings()
     init_db()
+    validate_modrinth_settings()
+    require_curseforge = bool(CURSEFORGE_API_KEY or CURSEFORGE_BASE_URL)
+    validate_curseforge_settings(required=require_curseforge)
 
 
 # The routers themselves define "modpacks" and "servers" prefixes.

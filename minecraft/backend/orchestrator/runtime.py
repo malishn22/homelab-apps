@@ -8,6 +8,8 @@ import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import threading
+import time
+import re
 
 import docker
 import requests
@@ -27,8 +29,12 @@ from .state import (
 )
 from .files import (
     prepare_instance_files,
+    _detect_curseforge_start_command,
     _detect_start_command,
     _strip_client_only_mods,
+    _detect_minecraft_version_from_root,
+    _extract_minecraft_versions,
+    _pick_best_version,
 )
 
 log = logging.getLogger(__name__)
@@ -52,6 +58,146 @@ STATUS_STARTING = "STARTING"
 STATUS_STOPPING = "STOPPING"
 STATUS_ONLINE = "ONLINE"
 STATUS_ERROR = "ERROR"
+TPS_POLL_SECONDS = int(os.environ.get("MINECRAFT_TPS_POLL_SECONDS", "30"))
+
+LEGACY_JVM_ARGS_LINES = {
+    "-XX:+UseG1GC",
+    "-XX:+UnlockExperimentalVMOptions",
+    "-XX:G1NewSizePercent=20",
+    "-XX:G1ReservePercent=20",
+    "-XX:MaxGCPauseMillis=50",
+    "-XX:G1HeapRegionSize=32M",
+    "-XX:InitiatingHeapOccupancyPercent=15",
+    "-Dsun.rmi.dgc.server.gcInterval=2147483646",
+    "-Dsun.rmi.dgc.client.gcInterval=2147483646",
+}
+
+
+def _is_legacy_jvm_args(text: str) -> bool:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return False
+    non_mem = [line for line in lines if not line.startswith(("-Xms", "-Xmx"))]
+    if set(non_mem) != LEGACY_JVM_ARGS_LINES:
+        return False
+    for line in lines:
+        if line.startswith(("-Xms", "-Xmx")):
+            continue
+        if line not in LEGACY_JVM_ARGS_LINES:
+            return False
+    return True
+
+
+def _default_jvm_args(_: int) -> str:
+    return ""
+
+
+def _parse_minecraft_version(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    versions = _extract_minecraft_versions(value)
+    return _pick_best_version(versions)
+
+
+def _java_major_for_mc(version: Optional[str]) -> int:
+    if not version:
+        return 17
+    parts = [p for p in version.split(".") if p.isdigit()]
+    if len(parts) >= 2 and parts[0] == "1":
+        minor = int(parts[1])
+        if minor <= 16:
+            return 8
+        if minor == 17:
+            return 16
+        return 17
+    return 17
+
+
+def _select_java_image(
+    instance: Dict, server_dir: Path, source: Optional[str], instance_id: str
+) -> str:
+    mc_version = instance.get("minecraft_version")
+    if not mc_version:
+        mc_version = _parse_minecraft_version(instance.get("version_number"))
+    if not mc_version:
+        mc_version = _detect_minecraft_version_from_root(server_dir, source=source)
+    if mc_version and mc_version != instance.get("minecraft_version"):
+        instance["minecraft_version"] = mc_version
+        upsert_instance(instance)
+    java_major = _java_major_for_mc(mc_version)
+    if mc_version:
+        _log_line(instance_id, f"[PREP] Using Java {java_major} for Minecraft {mc_version}")
+    return f"eclipse-temurin:{java_major}-jre"
+
+
+def _parse_tps_from_logs(raw: str) -> Optional[float]:
+    lines = raw.splitlines()
+    tps_from_re = re.compile(r"tps from last[^:]*:\s*([0-9]+(?:\.[0-9]+)?)", re.I)
+    tps_re = re.compile(r"tps:\s*([0-9]+(?:\.[0-9]+)?)", re.I)
+
+    for line in reversed(lines):
+        match = tps_from_re.search(line)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                continue
+        match = tps_re.search(line)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                continue
+    return None
+
+
+def _parse_tick_time_from_logs(raw: str) -> Optional[float]:
+    lines = raw.splitlines()
+    overall_re = re.compile(r"overall\s*:\s*mean tick time:\s*([0-9]+(?:\.[0-9]+)?)\s*ms", re.I)
+    generic_re = re.compile(r"mean tick time:\s*([0-9]+(?:\.[0-9]+)?)\s*ms", re.I)
+    best: Optional[float] = None
+
+    for line in reversed(lines):
+        match = overall_re.search(line)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                continue
+        match = generic_re.search(line)
+        if match and best is None:
+            try:
+                best = float(match.group(1))
+            except ValueError:
+                continue
+    return best
+
+
+def _should_hide_perf_line(line: str) -> bool:
+    lower = line.lower()
+    return "mean tick time" in lower and "mean tps" in lower
+
+
+def _should_poll_tps(instance: Dict, server_dir: Path) -> bool:
+    loader = (instance.get("loader") or "").lower()
+    if "forge" in loader or "neoforge" in loader:
+        return True
+    if (server_dir / "libraries" / "net" / "minecraftforge" / "forge").exists():
+        return True
+    if any(server_dir.glob("forge-*.jar")):
+        return True
+    return False
+
+
+def _send_container_command(container, command: str) -> None:
+    client = _docker_client()
+    exec_id = client.api.exec_create(
+        container.id,
+        cmd=["/bin/sh", "-c", f"printf '{command}\\n' > /proc/1/fd/0"],
+        stdin=False,
+        tty=False,
+    )
+    client.api.exec_start(exec_id)
 
 
 def _set_status(instance: Dict, status: str) -> Dict:
@@ -81,7 +227,16 @@ def _docker_client() -> docker.DockerClient:
 
 
 def create_instance(
-    *, name: str, project_id: str, version_id: str, version_number: Optional[str], loader: Optional[str], port: int, ram_gb: int, file_url: str
+    *,
+    name: str,
+    project_id: str,
+    version_id: str,
+    version_number: Optional[str],
+    loader: Optional[str],
+    source: Optional[str],
+    port: int,
+    ram_gb: int,
+    file_url: str,
 ) -> Dict:
     instance_id = f"srv-{uuid.uuid4().hex[:8]}"
     instance = {
@@ -91,6 +246,7 @@ def create_instance(
         "version_id": version_id,
         "version_number": version_number,
         "loader": loader,
+        "source": source,
         "port": port,
         "ram_gb": ram_gb,
         "file_url": file_url,
@@ -108,7 +264,14 @@ def create_instance(
         with _hydrate_semaphore:
             _log_line(instance_id, "[PREP] Starting download & extract")
             try:
-                prepared = prepare_instance_files(project_id, version_id, file_url, ram_gb, instance_id)
+                prepared = prepare_instance_files(
+                    project_id,
+                    version_id,
+                    file_url,
+                    ram_gb,
+                    instance_id,
+                    source=source,
+                )
                 instance.update(prepared)
                 _set_status(instance, STATUS_OFFLINE)
                 _log_line(instance_id, "[SUCCESS] Completed. Ready to start.")
@@ -154,8 +317,21 @@ def start_instance(instance_id: str) -> Dict:
     extract_dir = Path(instance["extract_dir"])
     server_dir_container, server_dir_host = _server_run_dirs(instance_id)
 
-    # Re-run client-only strip in case patterns were updated after initial hydration
-    _strip_client_only_mods(extract_dir, instance_id=instance_id)
+    source_key = (instance.get("source") or "").strip().lower()
+    mod_id = instance.get("project_id")
+    file_id = instance.get("version_id")
+    version_hint = instance.get("version_number")
+    try:
+        mod_id_int = int(mod_id) if mod_id is not None else None
+    except (TypeError, ValueError):
+        mod_id_int = None
+    try:
+        file_id_int = int(file_id) if file_id is not None else None
+    except (TypeError, ValueError):
+        file_id_int = None
+    if source_key != "curseforge":
+        # Re-run client-only strip in case patterns were updated after initial hydration
+        _strip_client_only_mods(extract_dir, instance_id=instance_id)
     _sync_extract_to_server(extract_dir, server_dir_container)
 
     # Auto-accept EULA right before start if it's missing
@@ -165,10 +341,57 @@ def start_instance(instance_id: str) -> Dict:
 
     ram_gb = instance.get("ram_gb", 4)
 
+    jvm_args = server_dir_container / "user_jvm_args.txt"
+    if source_key == "curseforge":
+        if jvm_args.exists():
+            try:
+                if _is_legacy_jvm_args(jvm_args.read_text()):
+                    jvm_args.write_text("")
+                    _log_line(instance_id, "[PREP] Cleared user_jvm_args.txt defaults")
+            except Exception:
+                pass
+        else:
+            jvm_args.write_text(_default_jvm_args(ram_gb))
+            _log_line(instance_id, "[PREP] Created user_jvm_args.txt")
+
     try:
-        cmd, entry_target = _detect_start_command(
-            server_dir_container, ram_gb, instance_id=instance_id
-        )
+        if source_key == "curseforge":
+            cmd, entry_target = _detect_curseforge_start_command(
+                server_dir_container,
+                ram_gb,
+                instance_id=instance_id,
+                mod_id=mod_id_int,
+                file_id=file_id_int,
+                version_hint=version_hint,
+            )
+        else:
+            cmd, entry_target = _detect_start_command(
+                server_dir_container, ram_gb, instance_id=instance_id
+            )
+        if source_key == "curseforge":
+            unix_args = next(
+                (
+                    p
+                    for p in server_dir_container.rglob("unix_args.txt")
+                    if p.is_file()
+                ),
+                None,
+            )
+            if not unix_args and any("unix_args.txt" in part for part in cmd):
+                forge_jars = [
+                    p
+                    for p in server_dir_container.glob("forge-*.jar")
+                    if "installer" not in p.name.lower()
+                ]
+                if forge_jars:
+                    forge_jars.sort(key=lambda p: len(p.name))
+                    jar = forge_jars[0].name
+                    cmd = [
+                        "/bin/bash",
+                        "-c",
+                        f"java -Xms{ram_gb}G -Xmx{ram_gb}G -jar {jar} nogui",
+                    ]
+                    _log_line(instance_id, "[PREP] unix_args.txt missing; using Forge jar directly")
         instance["start_command"] = cmd
         instance["entry_target"] = entry_target
         upsert_instance(instance)
@@ -192,11 +415,12 @@ def start_instance(instance_id: str) -> Dict:
         "INIT_MEMORY": f"{ram_gb}G",
         "MAX_MEMORY": f"{ram_gb}G",
     }
+    image = _select_java_image(instance, server_dir_container, source_key, instance_id)
 
     _log_line(instance_id, "[INFO] Starting server container…")
     try:
         container = client.containers.run(
-            image="eclipse-temurin:17-jre",
+            image=image,
             name=instance["container_name"],
             command=cmd,
             working_dir="/data",
@@ -250,7 +474,13 @@ def instance_status(instance_id: str) -> Dict:
     if not instance:
         return {
             "status": "OFFLINE",
-            "stats": {"ramUsage": 0, "ramTotal": 0, "cpuLoad": 0.0, "tps": 0.0},
+            "stats": {
+                "ramUsage": 0,
+                "ramTotal": 0,
+                "cpuLoad": 0.0,
+                "tps": None,
+                "tickTimeMs": None,
+            },
         }
 
     status = instance.get("status", "OFFLINE")
@@ -258,8 +488,10 @@ def instance_status(instance_id: str) -> Dict:
         "ramUsage": 0,
         "ramTotal": instance.get("ram_gb", 0),
         "cpuLoad": 0.0,
-        "tps": 0.0,
+        "tps": None,
+        "tickTimeMs": None,
     }
+    server_dir_container, _ = _server_run_dirs(instance_id)
 
     container = _container_for(instance)
 
@@ -315,11 +547,48 @@ def instance_status(instance_id: str) -> Dict:
                     or [1]
                 )
             )
-        stats["ramUsage"] = round(mem_usage / (1024 ** 3), 2)
-        stats["ramTotal"] = round(mem_limit / (1024 ** 3), 2)
+        mem_usage_gb = round(mem_usage / (1024 ** 3), 2)
+        mem_limit_gb = round(mem_limit / (1024 ** 3), 2)
+        configured_total = instance.get("ram_gb", 0) or 0
+        stats["ramTotal"] = configured_total if configured_total > 0 else mem_limit_gb
+        stats["ramUsage"] = (
+            min(mem_usage_gb, stats["ramTotal"]) if stats["ramTotal"] > 0 else mem_usage_gb
+        )
         stats["cpuLoad"] = round(cpu_percent, 2)
     except Exception as exc:  # pragma: no cover
         log.warning("Failed to read stats for %s: %s", instance_id, exc)
+
+    # TPS (optional): poll via console command and parse logs
+    try:
+        now = time.time()
+        last_tps_at = instance.get("last_tps_at", 0) or 0
+        last_request_at = instance.get("last_tps_request_at", 0) or 0
+        last_tick_at = instance.get("last_tick_time_at", 0) or 0
+        if running and status in {"ONLINE", "STARTING"} and _should_poll_tps(instance, server_dir_container):
+            if now - last_request_at >= TPS_POLL_SECONDS:
+                tps_cmd = "forge tps" if "forge" in (instance.get("loader") or "").lower() else "tps"
+                _send_container_command(container, tps_cmd)
+                instance["last_tps_request_at"] = now
+                upsert_instance(instance)
+            raw_logs = container.logs(tail=200).decode("utf-8", errors="ignore")
+            parsed_tps = _parse_tps_from_logs(raw_logs)
+            parsed_tick = _parse_tick_time_from_logs(raw_logs)
+            if parsed_tps is not None:
+                instance["last_tps"] = parsed_tps
+                instance["last_tps_at"] = now
+                upsert_instance(instance)
+            if parsed_tick is not None:
+                instance["last_tick_time_ms"] = parsed_tick
+                instance["last_tick_time_at"] = now
+                upsert_instance(instance)
+        stats["tps"] = instance.get("last_tps")
+        stats["tickTimeMs"] = instance.get("last_tick_time_ms")
+        if last_tps_at and now - last_tps_at > max(TPS_POLL_SECONDS * 2, 120):
+            stats["tps"] = None
+        if last_tick_at and now - last_tick_at > max(TPS_POLL_SECONDS * 2, 120):
+            stats["tickTimeMs"] = None
+    except Exception as exc:  # pragma: no cover
+        log.warning("Failed to read TPS for %s: %s", instance_id, exc)
 
     # ----------------------------------------------------------------------
     # State transitions with a running / stopped container
@@ -347,7 +616,8 @@ def instance_status(instance_id: str) -> Dict:
         # If status is already ONLINE or ERROR, leave it as-is.
 
     # TPS: only 20 when fully ONLINE and running
-    stats["tps"] = 20.0 if running and status == "ONLINE" else 0.0
+    if stats.get("tps") is None:
+        stats["tps"] = None
 
     instance["status"] = status
     upsert_instance(instance)
@@ -367,7 +637,7 @@ def tail_logs(instance_id: str, tail: int = 200) -> List[str]:
     if container:
         try:
             raw = container.logs(tail=tail).decode("utf-8", errors="ignore")
-            container_lines = raw.splitlines()
+            container_lines = [line for line in raw.splitlines() if not _should_hide_perf_line(line)]
             logs.extend(container_lines)
         except Exception as exc:  # pragma: no cover
             log.warning("Failed to fetch logs for %s: %s", instance_id, exc)

@@ -25,6 +25,8 @@ load_local_env()
 
 MODRINTH_BASE_URL = os.environ.get("MODRINTH_BASE_URL")
 MODRINTH_USER_AGENT = os.environ.get("MODRINTH_USER_AGENT")
+CURSEFORGE_BASE_URL = os.environ.get("CURSEFORGE_BASE_URL")
+CURSEFORGE_API_KEY = os.environ.get("CURSEFORGE_API_KEY")
 
 
 def validate_modrinth_settings() -> None:
@@ -35,4 +37,17 @@ def validate_modrinth_settings() -> None:
         raise RuntimeError(
             "Missing required environment variables: MODRINTH_BASE_URL and "
             "MODRINTH_USER_AGENT. Set them in backend/.env"
+        )
+
+
+def validate_curseforge_settings(required: bool = False) -> None:
+    """
+    Ensure CurseForge settings are present when required.
+    """
+    if not required:
+        return
+    if not CURSEFORGE_BASE_URL or not CURSEFORGE_API_KEY:
+        raise RuntimeError(
+            "Missing required environment variables: CURSEFORGE_BASE_URL and "
+            "CURSEFORGE_API_KEY. Set them in backend/.env"
         )

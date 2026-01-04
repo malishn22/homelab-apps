@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import quote_plus
 
@@ -68,6 +69,37 @@ def init_db() -> None:
             """
             ALTER TABLE modpacks
             ADD COLUMN IF NOT EXISTS server_versions JSONB DEFAULT '[]'::jsonb;
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS modpack_search_cache (
+                cache_key TEXT PRIMARY KEY,
+                payload JSONB NOT NULL,
+                cached_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS curseforge_server_pack_cache (
+                mod_id BIGINT PRIMARY KEY,
+                has_server_pack BOOLEAN NOT NULL,
+                server_files JSONB,
+                cached_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_modpack_search_cached_at
+            ON modpack_search_cache (cached_at DESC);
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_curseforge_server_pack_cached_at
+            ON curseforge_server_pack_cache (cached_at DESC);
             """
         )
 
@@ -241,3 +273,98 @@ def fetch_modpack_by_id(project_id: str) -> Optional[Dict[str, Any]]:
         "server_versions": row.get("server_versions") or [],
         "refreshed_at": refreshed_at_value.isoformat() if refreshed_at_value else None,
     }
+
+
+def get_search_cache(cache_key: str, ttl_seconds: int) -> Optional[Dict[str, Any]]:
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT payload, cached_at
+            FROM modpack_search_cache
+            WHERE cache_key = %s;
+            """,
+            (cache_key,),
+        )
+        row = cur.fetchone()
+
+    if not row:
+        return None
+    cached_at = row.get("cached_at")
+    if not cached_at:
+        return None
+    now = datetime.now(timezone.utc)
+    if now - cached_at > timedelta(seconds=ttl_seconds):
+        return None
+    return row.get("payload")
+
+
+def set_search_cache(cache_key: str, payload: Dict[str, Any]) -> None:
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO modpack_search_cache (cache_key, payload, cached_at)
+            VALUES (%s, %s, NOW())
+            ON CONFLICT (cache_key) DO UPDATE SET
+                payload = EXCLUDED.payload,
+                cached_at = EXCLUDED.cached_at;
+            """,
+            (cache_key, Json(payload)),
+        )
+
+
+def clear_search_cache(cache_key: str) -> None:
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            DELETE FROM modpack_search_cache
+            WHERE cache_key = %s;
+            """,
+            (cache_key,),
+        )
+
+
+def get_curseforge_server_pack_cache(
+    mod_id: int, ttl_seconds: int
+) -> Optional[Dict[str, Any]]:
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT has_server_pack, server_files, cached_at
+            FROM curseforge_server_pack_cache
+            WHERE mod_id = %s;
+            """,
+            (mod_id,),
+        )
+        row = cur.fetchone()
+
+    if not row:
+        return None
+    cached_at = row.get("cached_at")
+    if not cached_at:
+        return None
+    now = datetime.now(timezone.utc)
+    if now - cached_at > timedelta(seconds=ttl_seconds):
+        return None
+    return {
+        "has_server_pack": bool(row.get("has_server_pack")),
+        "server_files": row.get("server_files"),
+    }
+
+
+def set_curseforge_server_pack_cache(
+    mod_id: int, has_server_pack: bool, server_files: Optional[List[Dict[str, Any]]] = None
+) -> None:
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO curseforge_server_pack_cache (
+                mod_id, has_server_pack, server_files, cached_at
+            )
+            VALUES (%s, %s, %s, NOW())
+            ON CONFLICT (mod_id) DO UPDATE SET
+                has_server_pack = EXCLUDED.has_server_pack,
+                server_files = EXCLUDED.server_files,
+                cached_at = EXCLUDED.cached_at;
+            """,
+            (mod_id, has_server_pack, Json(server_files) if server_files is not None else None),
+        )

@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import threading
+import time
 
 import docker
 import requests
@@ -44,15 +45,20 @@ def ensure_dirs() -> None:
 
 def load_instances() -> List[Dict]:
     ensure_dirs()
-    try:
-        return json.loads(STATE_FILE.read_text())
-    except json.JSONDecodeError:
-        return []
+    for _ in range(3):
+        try:
+            return json.loads(STATE_FILE.read_text())
+        except json.JSONDecodeError:
+            time.sleep(0.05)
+    return []
 
 
 def save_instances(instances: List[Dict]) -> None:
     ensure_dirs()
-    STATE_FILE.write_text(json.dumps(instances, indent=2))
+    payload = json.dumps(instances, indent=2)
+    tmp_path = STATE_FILE.with_suffix(".tmp")
+    tmp_path.write_text(payload)
+    tmp_path.replace(STATE_FILE)
 
 
 def upsert_instance(instance: Dict) -> Dict:

@@ -8,6 +8,7 @@ class CreateServerRequest(BaseModel):
     version_id: str
     version_number: Optional[str] = None
     loader: Optional[str] = None
+    source: Optional[str] = None
     port: int = Field(25565, ge=1, le=65535)
     ram_gb: int = Field(4, ge=1, le=32)
 
