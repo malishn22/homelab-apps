@@ -56,7 +56,7 @@ const App: React.FC = () => {
         ramLimit: instance.ram_gb || 4,
     });
 
-    
+
     useEffect(() => {
         const bootstrap = async () => {
             try {
@@ -151,14 +151,14 @@ const App: React.FC = () => {
                 prev.map((srv) =>
                     srv.id === serverId
                         ? {
-                              ...srv,
-                              status,
-                              ramUsage:
-                                  typeof stats.ramUsage === 'number'
-                                      ? stats.ramUsage
-                                      : srv.ramUsage,
-                              ramLimit: srv.ramLimit,
-                          }
+                            ...srv,
+                            status,
+                            ramUsage:
+                                typeof stats.ramUsage === 'number'
+                                    ? stats.ramUsage
+                                    : srv.ramUsage,
+                            ramLimit: srv.ramLimit,
+                        }
                         : srv
                 )
             );
@@ -384,8 +384,7 @@ const App: React.FC = () => {
         // Fire-and-forget API call
         apiDeleteServer(serverId).catch((err: any) => {
             addNotifications([
-                `Backend delete failed for "${server?.name || serverId}": ${
-                    err?.message || err
+                `Backend delete failed for "${server?.name || serverId}": ${err?.message || err
                 }`,
             ]);
         });
@@ -487,7 +486,7 @@ const App: React.FC = () => {
                 loader: loaderLabel,
                 source: sourceLabel,
                 port: nextPort,
-                ram_gb: 4,
+                ram_mb: 4096,
             });
 
             const mapped = mapInstanceToServer(created);
@@ -650,7 +649,8 @@ const App: React.FC = () => {
                         statsById={serverStats}
                         onSelectServer={handleServerSelect}
                         onCreateServer={() => {
-                            addNotifications(['Create a server via the Modpack install flow to provision files.']);
+                            setCurrentView(View.MODPACKS);
+                            addNotifications(['Select a modpack to create a new server instance.']);
                         }}
                         onUpdateServer={updateServer}
                         onStartServer={startServer}
@@ -661,7 +661,7 @@ const App: React.FC = () => {
             case View.SETTINGS:
                 return (
                     <div className="flex flex-col items-center justify-center h-full text-text-muted animate-[fadeIn_0.5s_ease-out]">
-                         <div className="w-24 h-24 rounded-full bg-bg-surface/50 flex items-center justify-center border border-white/5 mb-6 shadow-glow shadow-accent/10">
+                        <div className="w-24 h-24 rounded-full bg-bg-surface/50 flex items-center justify-center border border-white/5 mb-6 shadow-glow shadow-accent/10">
                             <Construction size={40} className="text-accent opacity-80" />
                         </div>
                         <h3 className="text-xl font-bold text-white mb-2">Settings</h3>
@@ -677,9 +677,9 @@ const App: React.FC = () => {
         <div className="flex min-h-screen w-full font-sans overflow-auto">
             {/* Sidebar Background Blur Layer */}
             <div className="absolute inset-y-0 left-0 w-64 bg-bg-glass backdrop-blur-xl border-r border-white/5 z-10"></div>
-            
+
             <Sidebar currentView={currentView} onChangeView={setCurrentView} />
-            
+
             <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative z-0">
                 {/* Header */}
                 <header className="h-20 flex items-center justify-between px-8 shrink-0 z-10">
@@ -687,7 +687,7 @@ const App: React.FC = () => {
                         <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
                         <span className="text-xs font-semibold text-emerald-400 tracking-wide uppercase">System Operational</span>
                     </div>
-                    
+
                     <div className="flex items-center gap-4">
                         <div className="relative" ref={notificationsRef}>
                             <button

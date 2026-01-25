@@ -58,6 +58,7 @@ export interface InstallRequestOptions {
   createNew?: boolean;
   serverName?: string;
   serverPort?: number;
+  ramMB?: number;
 }
 
 export interface ServerStats {
@@ -70,14 +71,14 @@ export interface ServerStats {
 }
 
 export interface Server {
-    id: string;
-    name: string;
-    type: string;
-    version: string;
-    port: number;
-    status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'MAINTENANCE' | 'PREPARING' | 'ERROR';
-    players: number;
-    maxPlayers: number;
-    ramUsage: number;
-    ramLimit: number;
+  id: string;
+  name: string;
+  type: string;
+  version: string;
+  port: number;
+  status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'MAINTENANCE' | 'PREPARING' | 'ERROR';
+  players: number;
+  maxPlayers: number;
+  ramUsage: number;
+  ramLimit: number;
 }

@@ -54,7 +54,7 @@ def create_server_instance(req: CreateServerRequest) -> Dict:
         loader=req.loader,
         source=source_key or None,
         port=req.port,
-        ram_gb=req.ram_gb,
+        ram_mb=req.ram_mb,
         file_url=file_url,
     )
     return instance

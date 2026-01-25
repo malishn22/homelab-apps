@@ -9,7 +9,7 @@ export type CreateServerPayload = {
   loader: string;
   source?: string;
   port: number;
-  ram_gb: number;
+  ram_mb: number;
 };
 
 async function handleJson<T>(res: Response): Promise<T> {

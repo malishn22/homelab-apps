@@ -29,13 +29,14 @@ from .state import (
 )
 from .files import (
     prepare_instance_files,
-    _detect_curseforge_start_command,
-    _detect_start_command,
     _strip_client_only_mods,
-    _detect_minecraft_version_from_root,
-    _extract_minecraft_versions,
-    _pick_best_version,
 )
+from .utils import (
+    detect_minecraft_version_from_root,
+    extract_minecraft_versions,
+    pick_best_version,
+)
+from .providers.factory import get_provider
 
 log = logging.getLogger(__name__)
 
@@ -95,8 +96,8 @@ def _default_jvm_args(_: int) -> str:
 def _parse_minecraft_version(value: Optional[str]) -> Optional[str]:
     if not value:
         return None
-    versions = _extract_minecraft_versions(value)
-    return _pick_best_version(versions)
+    versions = extract_minecraft_versions(value)
+    return pick_best_version(versions)
 
 
 def _java_major_for_mc(version: Optional[str]) -> int:
@@ -105,11 +106,14 @@ def _java_major_for_mc(version: Optional[str]) -> int:
     parts = [p for p in version.split(".") if p.isdigit()]
     if len(parts) >= 2 and parts[0] == "1":
         minor = int(parts[1])
-        if minor <= 16:
-            return 8
-        if minor == 17:
-            return 16
-        return 17
+        if minor >= 21: # 1.21+ needs Java 21
+            return 21
+        if minor >= 18: # 1.18+ needs Java 17
+            return 17
+        if minor == 17: # 1.17 needs Java 16 (or 17)
+            return 17
+        return 8
+    # Fallback for unknown/parse failure
     return 17
 
 
@@ -120,11 +124,30 @@ def _select_java_image(
     if not mc_version:
         mc_version = _parse_minecraft_version(instance.get("version_number"))
     if not mc_version:
-        mc_version = _detect_minecraft_version_from_root(server_dir, source=source)
+        mc_version = detect_minecraft_version_from_root(server_dir, source=source)
     if mc_version and mc_version != instance.get("minecraft_version"):
         instance["minecraft_version"] = mc_version
         upsert_instance(instance)
-    java_major = _java_major_for_mc(mc_version)
+    if mc_version:
+        # Check if we should override based on modern Forge cues
+        if _java_major_for_mc(mc_version) == 8:
+            # If we detect unix_args.txt, it CANNOT be Java 8. It must be 17+.
+            if any(server_dir.rglob("unix_args.txt")):
+                java_major = 21 # Safest modern default
+                _log_line(instance_id, f"[PREP] Detected unix_args.txt with old MC version ({mc_version}). Forcing Java {java_major}.")
+            else:
+                 java_major = 8
+        else:
+            java_major = _java_major_for_mc(mc_version)
+    else:
+        # No version detected.
+        # Check for unix_args.txt
+        if any(server_dir.rglob("unix_args.txt")):
+             java_major = 21
+             _log_line(instance_id, "[PREP] No MC version detected, but found unix_args.txt. Defaulting to Java 21.")
+        else:
+            java_major = 21 # Default to modern for unknown
+            
     if mc_version:
         _log_line(instance_id, f"[PREP] Using Java {java_major} for Minecraft {mc_version}")
     return f"eclipse-temurin:{java_major}-jre"
@@ -235,7 +258,7 @@ def create_instance(
     loader: Optional[str],
     source: Optional[str],
     port: int,
-    ram_gb: int,
+    ram_mb: int,
     file_url: str,
 ) -> Dict:
     instance_id = f"srv-{uuid.uuid4().hex[:8]}"
@@ -248,7 +271,7 @@ def create_instance(
         "loader": loader,
         "source": source,
         "port": port,
-        "ram_gb": ram_gb,
+        "ram_mb": ram_mb,
         "file_url": file_url,
         "status": STATUS_PREPARING,
         "container_name": f"mc-{instance_id}",
@@ -268,7 +291,7 @@ def create_instance(
                     project_id,
                     version_id,
                     file_url,
-                    ram_gb,
+                    ram_mb,
                     instance_id,
                     source=source,
                 )
@@ -301,7 +324,13 @@ def _container_ready(container) -> bool:
         raw = container.logs(tail=200).decode("utf-8", errors="ignore").lower()
     except Exception:
         return False
-    return "done (" in raw and 'for help, type "help"' in raw
+    # Standard "Done (X.Xs)! For help, type "help""
+    if "done (" in raw and 'for help, type "help"' in raw:
+        return True
+    # ModernFix / some modpacks: "Dedicated server took 306.67 seconds to load"
+    if "dedicated server took" in raw and "seconds to load" in raw:
+        return True
+    return False
 
 
 def start_instance(instance_id: str) -> Dict:
@@ -339,7 +368,7 @@ def start_instance(instance_id: str) -> Dict:
     if not eula_file.exists():
         eula_file.write_text("eula=true\n")
 
-    ram_gb = instance.get("ram_gb", 4)
+    ram_mb = instance.get("ram_mb", 4096)
 
     jvm_args = server_dir_container / "user_jvm_args.txt"
     if source_key == "curseforge":
@@ -351,47 +380,23 @@ def start_instance(instance_id: str) -> Dict:
             except Exception:
                 pass
         else:
-            jvm_args.write_text(_default_jvm_args(ram_gb))
+            # We don't need a default Xms/Xmx here if we pass it via cmd line, 
+            # but legacy code wrote one. Let's write empty for now or adapt if needed.
+            # Actually, CurseForge provider handles this.
+            jvm_args.write_text("") 
             _log_line(instance_id, "[PREP] Created user_jvm_args.txt")
 
     try:
-        if source_key == "curseforge":
-            cmd, entry_target = _detect_curseforge_start_command(
-                server_dir_container,
-                ram_gb,
-                instance_id=instance_id,
-                mod_id=mod_id_int,
-                file_id=file_id_int,
-                version_hint=version_hint,
-            )
-        else:
-            cmd, entry_target = _detect_start_command(
-                server_dir_container, ram_gb, instance_id=instance_id
-            )
-        if source_key == "curseforge":
-            unix_args = next(
-                (
-                    p
-                    for p in server_dir_container.rglob("unix_args.txt")
-                    if p.is_file()
-                ),
-                None,
-            )
-            if not unix_args and any("unix_args.txt" in part for part in cmd):
-                forge_jars = [
-                    p
-                    for p in server_dir_container.glob("forge-*.jar")
-                    if "installer" not in p.name.lower()
-                ]
-                if forge_jars:
-                    forge_jars.sort(key=lambda p: len(p.name))
-                    jar = forge_jars[0].name
-                    cmd = [
-                        "/bin/bash",
-                        "-c",
-                        f"java -Xms{ram_gb}G -Xmx{ram_gb}G -jar {jar} nogui",
-                    ]
-                    _log_line(instance_id, "[PREP] unix_args.txt missing; using Forge jar directly")
+        # Use Provider to detect start command
+        provider = get_provider(source_key, instance_id, server_dir_container)
+        cmd, entry_target = provider.generate_start_command(
+            server_dir_container,
+            ram_mb,
+            project_id=mod_id,
+            version_id=file_id,
+            version_hint=version_hint,
+        )
+
         instance["start_command"] = cmd
         instance["entry_target"] = entry_target
         upsert_instance(instance)
@@ -412,8 +417,8 @@ def start_instance(instance_id: str) -> Dict:
 
     env = {
         "EULA": "TRUE",
-        "INIT_MEMORY": f"{ram_gb}G",
-        "MAX_MEMORY": f"{ram_gb}G",
+        "INIT_MEMORY": f"{ram_mb}M",
+        "MAX_MEMORY": f"{ram_mb}M",
     }
     image = _select_java_image(instance, server_dir_container, source_key, instance_id)
 
@@ -486,7 +491,7 @@ def instance_status(instance_id: str) -> Dict:
     status = instance.get("status", "OFFLINE")
     stats = {
         "ramUsage": 0,
-        "ramTotal": instance.get("ram_gb", 0),
+        "ramTotal": round((instance.get("ram_mb", 0) or 0) / 1024, 2),
         "cpuLoad": 0.0,
         "tps": None,
         "tickTimeMs": None,
@@ -549,8 +554,12 @@ def instance_status(instance_id: str) -> Dict:
             )
         mem_usage_gb = round(mem_usage / (1024 ** 3), 2)
         mem_limit_gb = round(mem_limit / (1024 ** 3), 2)
-        configured_total = instance.get("ram_gb", 0) or 0
-        stats["ramTotal"] = configured_total if configured_total > 0 else mem_limit_gb
+        
+        # ram_mb is the source of truth
+        configured_mb = instance.get("ram_mb", 0) or 0
+        configured_gb = round(configured_mb / 1024, 2)
+        
+        stats["ramTotal"] = configured_gb if configured_gb > 0 else mem_limit_gb
         stats["ramUsage"] = (
             min(mem_usage_gb, stats["ramTotal"]) if stats["ramTotal"] > 0 else mem_usage_gb
         )
@@ -601,14 +610,9 @@ def instance_status(instance_id: str) -> Dict:
         # Container is running
         if status == "STARTING":
             # Only promote to ONLINE once we see the Minecraft "Done (...)" line
-            try:
-                raw_logs = container.logs(tail=200).decode("utf-8", errors="ignore").lower()
-                if "done (" in raw_logs:
-                    status = "ONLINE"
-                else:
-                    status = "STARTING"
-            except Exception as exc:  # pragma: no cover
-                log.warning("Failed to check logs for %s: %s", instance_id, exc)
+            if _container_ready(container):
+                status = "ONLINE"
+            else:
                 status = "STARTING"
         elif status in {"OFFLINE", "PREPARING"}:
             # Container somehow started without us marking STARTING -> treat as ONLINE

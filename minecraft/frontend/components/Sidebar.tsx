@@ -8,7 +8,7 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) => {
-    
+
     const navItems = [
         { id: View.DASHBOARD, label: 'Console', icon: <TerminalSquare size={20} /> },
         { id: View.MODPACKS, label: 'Browse', icon: <Box size={20} /> },
@@ -34,7 +34,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) => {
                 <div className="glass-panel p-3 rounded-2xl flex items-center gap-3 group cursor-pointer transition-colors hover:bg-white/5">
                     <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-accent to-blue-600 p-[2px]">
                         <div className="w-full h-full rounded-[10px] bg-bg-surface flex items-center justify-center overflow-hidden">
-                             <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="User" />
+                            <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="User" />
                         </div>
                     </div>
                     <div className="flex-1 min-w-0">
@@ -55,8 +55,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) => {
                         onClick={() => onChangeView(item.id)}
                         className={`
                             flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-300 relative overflow-hidden group
-                            ${currentView === item.id 
-                                ? 'text-white bg-white/5 shadow-inner' 
+                            ${currentView === item.id
+                                ? 'text-white bg-white/5 shadow-inner'
                                 : 'text-text-muted hover:text-white hover:bg-white/5'
                             }
                         `}
@@ -65,7 +65,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) => {
                         {currentView === item.id && (
                             <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-primary rounded-r-full shadow-[0_0_10px_var(--tw-shadow-color)] shadow-primary"></div>
                         )}
-                        
+
                         <span className={`relative z-10 transition-colors ${currentView === item.id ? 'text-primary' : 'group-hover:text-white'}`}>
                             {item.icon}
                         </span>

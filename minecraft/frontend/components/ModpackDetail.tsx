@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import type { Modpack, ModpackSource, ServerVersionOption, Server, InstallRequestOptions } from '../types';
-import { ArrowLeft, Download, Package, Tag, Server as ServerIcon, Users, Sparkles, Clock, CheckCircle2, X } from 'lucide-react';
+import { ArrowLeft, Download, Package, Tag, Server as ServerIcon, Users, Sparkles, Clock, CheckCircle2, X, MemoryStick, Plus } from 'lucide-react';
 import { fetchServerFiles, ServerVersion } from '../src/api/modpacks';
 
 interface ModpackDetailProps {
@@ -121,6 +121,8 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
     const [panelStep, setPanelStep] = useState<'version' | 'server'>('version');
     const [newServerName, setNewServerName] = useState<string>(`${modpack.title} Server`);
     const [newServerPort, setNewServerPort] = useState<number>(25565);
+    const [ramMB, setRamMB] = useState<number>(4096);
+    const [isCreatingNew, setIsCreatingNew] = useState(false);
 
     const sanitizeSchema = {
         ...defaultSchema,
@@ -311,20 +313,20 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                     <div className="flex flex-wrap gap-2">
                         {isMultiLoader
                             ? loaders.map((loader) => (
-                                  <span
-                                      key={`loader-${loader}`}
-                                      className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-xs text-primary uppercase tracking-wider"
-                                  >
-                                      <Sparkles size={12} /> {loader}
-                                  </span>
-                              ))
+                                <span
+                                    key={`loader-${loader}`}
+                                    className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-xs text-primary uppercase tracking-wider"
+                                >
+                                    <Sparkles size={12} /> {loader}
+                                </span>
+                            ))
                             : primaryLoaderBase && (
-                                  <span
-                                      className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-xs text-primary uppercase tracking-wider"
-                                  >
-                                      <Sparkles size={12} /> {primaryLoaderBase}
-                                  </span>
-                              )}
+                                <span
+                                    className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-xs text-primary uppercase tracking-wider"
+                                >
+                                    <Sparkles size={12} /> {primaryLoaderBase}
+                                </span>
+                            )}
                         {latestVersion && (
                             <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-xs text-primary uppercase tracking-wider">
                                 <Tag size={12} /> {latestVersion}
@@ -439,13 +441,12 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                                                 <button
                                                     key={ver.id || ver.versionNumber}
                                                     onClick={() => supported && setSelectedVersionId(ver.id)}
-                                                    className={`w-full text-left rounded-xl border px-3 py-2 transition-all ${
-                                                        isActive
-                                                            ? 'border-primary/60 bg-primary/10 shadow-[0_6px_20px_rgba(127,90,240,0.25)]'
-                                                            : supported
+                                                    className={`w-full text-left rounded-xl border px-3 py-2 transition-all ${isActive
+                                                        ? 'border-primary/60 bg-primary/10 shadow-[0_6px_20px_rgba(127,90,240,0.25)]'
+                                                        : supported
                                                             ? 'border-border-main bg-bg-surface/70 hover:border-primary/40 hover:bg-primary/5'
                                                             : 'border-border-main bg-bg-surface/50 cursor-not-allowed opacity-60'
-                                                    }`}
+                                                        }`}
                                                 >
                                                     <div className="flex items-center justify-between gap-2">
                                                         <div className="flex items-center gap-2 flex-wrap">
@@ -488,10 +489,12 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                             {!isCheckingServers && panelStep === 'server' && (
                                 <div className="flex flex-col gap-3 flex-1 min-h-0">
                                     <label className="text-xs uppercase tracking-wide text-text-dim">Choose server</label>
-                                    {servers.length === 0 ? (
+                                    {servers.length === 0 || isCreatingNew ? (
                                         <div className="rounded-xl border border-border-main bg-bg-surface/70 p-4 space-y-3">
-                                            <div className="text-text-muted text-sm">
-                                                No servers yet. Provide a name and port to create one for this modpack.
+                                            <div className="flex items-start justify-between">
+                                                <div className="text-text-muted text-sm">
+                                                    No servers yet. Provide a name and port to create one for this modpack.
+                                                </div>
                                             </div>
                                             <div className="space-y-2">
                                                 <label className="block text-xs text-text-dim">Server name</label>
@@ -508,21 +511,62 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                                                     type="number"
                                                     value={newServerPort}
                                                     onChange={(e) => setNewServerPort(parseInt(e.target.value, 10) || 25565)}
-                                                    className="w-full rounded-lg bg-bg-surface/80 border border-border-main px-3 py-2 text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                                                    className="w-full rounded-lg bg-bg-surface/80 border border-border-main px-3 py-2 text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                                 />
+                                            </div>
+                                            <div className="space-y-4 pt-4 border-t border-white/5 mt-4">
+                                                <div className="flex items-end justify-between gap-4">
+                                                    <label className="text-xs uppercase tracking-wide text-text-muted flex items-center gap-2 font-semibold">
+                                                        <MemoryStick size={14} className="text-primary" />
+                                                        RAM Allocation
+                                                    </label>
+                                                    <div className="flex items-center gap-2 bg-black/20 rounded-lg p-1.5 border border-white/5">
+                                                        <input
+                                                            type="number"
+                                                            min={1024}
+                                                            max={12288}
+                                                            step={128}
+                                                            value={ramMB}
+                                                            onChange={(e) => {
+                                                                let val = parseInt(e.target.value) || 0;
+                                                                setRamMB(val);
+                                                            }}
+                                                            className="w-16 bg-transparent text-right text-sm font-bold text-white focus:outline-none font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                                        />
+                                                        <span className="text-xs text-text-dim pr-1">MB</span>
+                                                    </div>
+                                                </div>
+
+                                                <div className="space-y-2">
+                                                    <input
+                                                        type="range"
+                                                        min={1024}
+                                                        max={12288}
+                                                        step={128}
+                                                        value={ramMB}
+                                                        onChange={(e) => setRamMB(Number(e.target.value))}
+                                                        className="w-full h-2 bg-black/40 rounded-lg appearance-none cursor-pointer accent-primary hover:accent-primary/80 transition-all"
+                                                    />
+                                                    <div className="flex justify-between text-xs text-gray-200 font-mono px-2 font-bold bg-white/10 rounded-b-lg py-1.5 mt-1 border-t border-white/5">
+                                                        <span>1 GB</span>
+                                                        <span className={ramMB > 12288 ? "text-red-300" : "text-white"}>
+                                                            {(ramMB / 1024).toFixed(1)} GB
+                                                        </span>
+                                                        <span>12 GB</span>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="flex-1 min-h-0 overflow-auto space-y-2 pr-1">
+                                        <div className="flex-1 min-h-0 overflow-auto space-y-2 pr-1 flex flex-col">
                                             {servers.map((srv) => (
                                                 <button
                                                     key={srv.id}
                                                     onClick={() => setSelectedServerId(srv.id)}
-                                                    className={`w-full text-left rounded-xl border px-3 py-2 transition-all ${
-                                                        selectedServerId === srv.id
-                                                            ? 'border-primary/60 bg-primary/10'
-                                                            : 'border-border-main bg-bg-surface/70 hover:border-primary/30'
-                                                    }`}
+                                                    className={`w-full text-left rounded-xl border px-3 py-2 transition-all ${selectedServerId === srv.id
+                                                        ? 'border-primary/60 bg-primary/10'
+                                                        : 'border-border-main bg-bg-surface/70 hover:border-primary/30'
+                                                        }`}
                                                 >
                                                     <div className="flex items-center justify-between">
                                                         <div>
@@ -539,6 +583,20 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                                                     </div>
                                                 </button>
                                             ))}
+                                            <button
+                                                onClick={() => {
+                                                    setIsCreatingNew(true);
+                                                    setSelectedServerId(undefined);
+                                                    setNewServerName(`${modpack.title} Server ${servers.length + 1}`);
+                                                    setNewServerPort(25565 + servers.length);
+                                                }}
+                                                className="w-full text-left rounded-xl border border-dashed border-border-main bg-white/5 hover:bg-white/10 px-3 py-3 text-text-muted hover:text-white transition-all flex items-center justify-center gap-2 group"
+                                            >
+                                                <div className="p-1 rounded-full bg-white/10 group-hover:bg-primary/20 transition-colors">
+                                                    <Plus size={14} className="group-hover:text-primary" />
+                                                </div>
+                                                <span className="text-xs font-semibold uppercase tracking-wide">Create New Server Instance</span>
+                                            </button>
                                         </div>
                                     )}
                                 </div>
@@ -549,7 +607,13 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                             {panelStep === 'server' && (
                                 <button
                                     className="px-4 py-2 rounded-lg border border-border-main text-text-muted hover:text-white hover:border-white/40 transition-colors"
-                                    onClick={() => setPanelStep('version')}
+                                    onClick={() => {
+                                        if (isCreatingNew && servers.length > 0) {
+                                            setIsCreatingNew(false);
+                                        } else {
+                                            setPanelStep('version');
+                                        }
+                                    }}
                                 >
                                     Back
                                 </button>
@@ -581,7 +645,7 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                             </button>
                             {panelStep === 'server' && (
                                 <>
-                                    {servers.length === 0 ? (
+                                    {servers.length === 0 || isCreatingNew ? (
                                         <button
                                             className="px-4 py-2 rounded-lg bg-primary text-white font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
                                             disabled={
@@ -599,6 +663,7 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                                                     createNew: true,
                                                     serverName: newServerName,
                                                     serverPort: newServerPort,
+                                                    ramMB: ramMB,
                                                 });
                                             }}
                                         >
