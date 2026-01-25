@@ -1,0 +1,15 @@
+services:
+  calimali-api:
+    image: ghcr.io/malishn22/calimali-backend:latest
+    container_name: calimali-api
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_ENVIRONMENT: Production
+    networks:
+      - homelab
+
+networks:
+  homelab:
+    external: true
+
