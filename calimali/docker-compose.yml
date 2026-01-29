@@ -1,4 +1,19 @@
 services:
+  calimali-db:
+    image: postgres:16-alpine
+    container_name: calimali-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - calimali_db:/var/lib/postgresql/data
+    networks:
+      - homelab
+    ports:
+      - "5433:5432"
+
   calimali-api:
     image: ghcr.io/malishn22/calimali-backend:latest
     container_name: calimali-api
@@ -6,12 +21,17 @@ services:
     environment:
       ASPNETCORE_URLS: http://+:8080
       ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Default: Host=${DB_HOST};Port=${DB_PORT};Database=${DB_NAME};Username=${DB_USER};Password=${DB_PASSWORD}
     ports:
       - "8080:8080"
     networks:
       - homelab
+    depends_on:
+      - calimali-db
 
 networks:
   homelab:
     external: true
 
+volumes:
+  calimali_db:
