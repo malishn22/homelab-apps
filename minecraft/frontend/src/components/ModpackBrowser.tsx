@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Modpack, ModpackSource } from '../types';
-import { ModrinthModpack, searchModpacks } from '../src/api/modpacks';
-import { Search, Download, Sparkles, Users, Clock, RefreshCcw, ServerCrash, Server as ServerIcon, ChevronLeft, ChevronRight, CheckCircle2 } from 'lucide-react';
+import { ModrinthModpack, searchModpacks } from '../api/modpacks';
+import { Search, Download, Sparkles, Users, Clock, RefreshCcw, ServerCrash, Server as ServerIcon, ChevronLeft, ChevronRight, CheckCircle2, Loader2 } from 'lucide-react';
 
 const formatDownloads = (downloads?: number): string => {
     if (typeof downloads !== 'number') return 'N/A';
@@ -291,8 +291,19 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
             <div className="flex-1 overflow-auto pb-10">
                 <div className="flex flex-col lg:flex-row gap-6">
                     <div className="flex-1 min-w-0 space-y-4">
-                        {isLoading && (
-                            <div className="glass-panel rounded-2xl p-6 text-text-muted">Fetching modpacks...</div>
+                        {isLoading && modpacks.length === 0 && (
+                            <div className="flex flex-col items-center justify-center py-20 px-6 rounded-2xl glass-panel border border-border-main/50">
+                                <Loader2 className="w-12 h-12 text-primary animate-spin mb-4" strokeWidth={2} />
+                                <p className="text-lg font-medium text-white mb-1">Loading modpacks</p>
+                                <p className="text-sm text-text-muted text-center max-w-sm">Fetching from Modrinth and CurseForge. First load may take a few seconds.</p>
+                            </div>
+                        )}
+
+                        {isLoading && modpacks.length > 0 && (
+                            <div className="glass-panel rounded-2xl p-4 text-text-muted text-sm flex items-center gap-2">
+                                <Loader2 size={16} className="animate-spin shrink-0" />
+                                Updating results…
+                            </div>
                         )}
 
                         {error && (
@@ -301,7 +312,7 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
                             </div>
                         )}
 
-                        {!isLoading && (
+                        {(!isLoading || modpacks.length > 0) && (
                             <div className="space-y-4">
                                 {pagedPacks.map((pack, idx) => (
                                     <button

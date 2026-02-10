@@ -6,51 +6,25 @@ from typing import Optional, List, Dict, Tuple
 
 import requests
 
-try:
-    # Package import
-    from ..config import (
-        CURSEFORGE_API_KEY,
-        CURSEFORGE_BASE_URL,
-        MODRINTH_BASE_URL,
-        MODRINTH_USER_AGENT,
-    )
-    from ..db import (
-        init_db,
-        save_modpacks,
-        fetch_modpacks,
-        count_modpacks,
-        get_last_refresh,
-        fetch_modpack_by_id,
-    )
-    from ..modrinth_client import (
-        get_top_modpacks,
-        get_modpack_detail,
-        get_modpack_versions,
-    )
-except ImportError:  # script execution (python backend/services/modpacks.py)
-    import sys
-
-    CURRENT_DIR = Path(__file__).resolve().parent.parent
-    sys.path.append(str(CURRENT_DIR))
-    from config import (  # type: ignore
-        CURSEFORGE_API_KEY,
-        CURSEFORGE_BASE_URL,
-        MODRINTH_BASE_URL,
-        MODRINTH_USER_AGENT,
-    )
-    from db import (  # type: ignore
-        init_db,
-        save_modpacks,
-        fetch_modpacks,
-        count_modpacks,
-        get_last_refresh,
-        fetch_modpack_by_id,
-    )
-    from modrinth_client import (  # type: ignore
-        get_top_modpacks,
-        get_modpack_detail,
-        get_modpack_versions,
-    )
+from config import (
+    CURSEFORGE_API_KEY,
+    CURSEFORGE_BASE_URL,
+    MODRINTH_BASE_URL,
+    MODRINTH_USER_AGENT,
+)
+from db import (
+    init_db,
+    save_modpacks,
+    fetch_modpacks,
+    count_modpacks,
+    get_last_refresh,
+    fetch_modpack_by_id,
+)
+from modrinth_client import (
+    get_top_modpacks,
+    get_modpack_detail,
+    get_modpack_versions,
+)
 
 
 BASE_URL = MODRINTH_BASE_URL
@@ -119,65 +93,6 @@ def refresh_modpack_cache(limit: int) -> Tuple[List[Dict], str]:
     refreshed_at = datetime.now(timezone.utc).isoformat()
     save_modpacks(items, refreshed_at)
     return items, refreshed_at
-
-
-def search_modrinth(query: str, limit: int = 5) -> None:
-    url = f"{BASE_URL}/search"
-    headers = {"User-Agent": USER_AGENT}
-    params = {"query": query}
-    resp = requests.get(url, headers=headers, params=params, timeout=10)
-    resp.raise_for_status()
-    data = resp.json()
-
-    print(f"Found {data.get('total_hits', 0)} results for '{query}':")
-    for hit in data.get("hits", [])[:limit]:
-        print(
-            "-",
-            hit.get("title"),
-            "| slug:",
-            hit.get("slug"),
-            "| id:",
-            hit.get("project_id"),
-        )
-
-
-def get_versions(slug: str):
-    url = f"{BASE_URL}/project/{slug}/version"
-    headers = {"User-Agent": USER_AGENT}
-    resp = requests.get(url, headers=headers, timeout=10)
-    resp.raise_for_status()
-    return resp.json()
-
-
-def show_latest_version(slug: str) -> None:
-    versions = get_versions(slug)
-    if not versions:
-        print("No versions found for", slug)
-        return
-
-    latest = versions[0]  # Modrinth returns newest first
-    version_number = latest.get("version_number")
-    files = latest.get("files", [])
-    download_url = files[0]["url"] if files else None
-
-    print(f"Latest version for {slug}: {version_number}")
-    print("Download URL:", download_url)
-
-
-def print_top_modpacks(limit: int = 5) -> None:
-    packs = get_top_modpacks(base_url=BASE_URL, user_agent=USER_AGENT, limit=limit)
-    print(f"Top {len(packs)} modpacks on Modrinth (by downloads):")
-    for p in packs:
-        print(
-            "-",
-            p.get("title"),
-            "| slug:",
-            p.get("slug"),
-            "| id:",
-            p.get("project_id"),
-            "| downloads:",
-            p.get("downloads"),
-        )
 
 
 def _choose_best_file(files: list[dict]) -> Optional[dict]:

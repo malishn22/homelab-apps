@@ -1,46 +1,22 @@
-### FILE: backend/api/servers.py
-
 from __future__ import annotations
 
-from pathlib import Path
+import logging
 from typing import Dict
 
-from fastapi import APIRouter, HTTPException, Query, Body
-import logging
+from fastapi import APIRouter, HTTPException, Query
 
-# Import orchestrator/services in a way that works as package or flat layout
-try:
-    from ..schemas import CreateServerRequest, CommandRequest
-    from ..services.servers import (
-        OrchestratorError,
-        create_server_instance,
-        delete_instance,
-        instance_status,
-        list_server_instances,
-        send_command,
-        start_instance,
-        stop_instance,
-        tail_logs,
-    )
-except ImportError:
-    import sys
-
-    BASE_DIR = Path(__file__).resolve().parent.parent  # /app
-    if str(BASE_DIR) not in sys.path:
-        sys.path.append(str(BASE_DIR))
-
-    from schemas import CreateServerRequest, CommandRequest  # type: ignore
-    from services.servers import (  # type: ignore
-        OrchestratorError,
-        create_server_instance,
-        delete_instance,
-        instance_status,
-        list_server_instances,
-        send_command,
-        start_instance,
-        stop_instance,
-        tail_logs,
-    )
+from schemas import CreateServerRequest, CommandRequest
+from services.servers import (
+    OrchestratorError,
+    create_server_instance,
+    delete_instance,
+    instance_status,
+    list_server_instances,
+    send_command,
+    start_instance,
+    stop_instance,
+    tail_logs,
+)
 
 router = APIRouter(
     prefix="/servers",  # final path: /api/servers/...

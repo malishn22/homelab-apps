@@ -27,10 +27,7 @@ from .state import (
     _log_lock,
     _hydrate_semaphore,
 )
-from .files import (
-    prepare_instance_files,
-    _strip_client_only_mods,
-)
+from .files import prepare_instance_files
 from .utils import (
     detect_minecraft_version_from_root,
     extract_minecraft_versions,
@@ -358,9 +355,6 @@ def start_instance(instance_id: str) -> Dict:
         file_id_int = int(file_id) if file_id is not None else None
     except (TypeError, ValueError):
         file_id_int = None
-    if source_key != "curseforge":
-        # Re-run client-only strip in case patterns were updated after initial hydration
-        _strip_client_only_mods(extract_dir, instance_id=instance_id)
     _sync_extract_to_server(extract_dir, server_dir_container)
 
     # Auto-accept EULA right before start if it's missing

@@ -89,6 +89,14 @@ export async function searchModpacks(params?: {
   return parseSearchResponse(res);
 }
 
+export async function getModpackDetail(projectId: string): Promise<Record<string, unknown>> {
+  const res = await fetch(buildApiUrl(`/api/modpacks/${projectId}`));
+  if (!res.ok) {
+    throw new Error(`API request failed (${res.status})`);
+  }
+  return res.json() as Promise<Record<string, unknown>>;
+}
+
 export async function fetchServerFiles(
   projectId: string,
   source?: string,

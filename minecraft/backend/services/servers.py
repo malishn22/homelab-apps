@@ -1,40 +1,20 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Dict
 
-try:
-    from ..schemas import CreateServerRequest
-    from ..orchestrator import (
-        OrchestratorError,
-        create_instance,
-        delete_instance,
-        instance_status,
-        load_instances,
-        send_command,
-        start_instance,
-        stop_instance,
-        tail_logs,
-    )
-    from .modpacks import resolve_server_file_url
-except ImportError:  # script execution
-    import sys
-
-    CURRENT_DIR = Path(__file__).resolve().parent.parent
-    sys.path.append(str(CURRENT_DIR))
-    from schemas import CreateServerRequest  # type: ignore
-    from orchestrator import (  # type: ignore
-        OrchestratorError,
-        create_instance,
-        delete_instance,
-        instance_status,
-        load_instances,
-        send_command,
-        start_instance,
-        stop_instance,
-        tail_logs,
-    )
-    from services.modpacks import resolve_server_file_url  # type: ignore
+from schemas import CreateServerRequest
+from orchestrator import (
+    OrchestratorError,
+    create_instance,
+    delete_instance,
+    instance_status,
+    load_instances,
+    send_command,
+    start_instance,
+    stop_instance,
+    tail_logs,
+)
+from services.modpacks import resolve_server_file_url
 
 
 def list_server_instances() -> Dict:

@@ -1,41 +1,20 @@
-
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
-# Try package-style imports first (backend.main)
-try:
-    from .config import (
-        CURSEFORGE_API_KEY,
-        CURSEFORGE_BASE_URL,
-        validate_curseforge_settings,
-        validate_modrinth_settings,
-    )
-    from .db import init_db
-    from .api.modpacks import router as modpacks_router
-    from .api.servers import router as servers_router
-except ImportError:
-    # Fallback for flat layout (/app/main.py in Docker)
-    import sys
-
-    BASE_DIR = Path(__file__).resolve().parent
-    if str(BASE_DIR) not in sys.path:
-        sys.path.append(str(BASE_DIR))
-
-    from config import (  # type: ignore
-        CURSEFORGE_API_KEY,
-        CURSEFORGE_BASE_URL,
-        validate_curseforge_settings,
-        validate_modrinth_settings,
-    )
-    from db import init_db  # type: ignore
-    from api.modpacks import router as modpacks_router  # type: ignore
-    from api.servers import router as servers_router  # type: ignore
+from config import (
+    CURSEFORGE_API_KEY,
+    CURSEFORGE_BASE_URL,
+    validate_curseforge_settings,
+    validate_modrinth_settings,
+)
+from db import init_db
+from api.modpacks import router as modpacks_router
+from api.servers import router as servers_router
 
 
 app = FastAPI(title="Craft Control API", version="0.1.0")

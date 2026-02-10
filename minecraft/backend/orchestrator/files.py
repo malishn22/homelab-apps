@@ -65,8 +65,3 @@ def prepare_instance_files(
         "start_command": command,
         "minecraft_version": mc_version,
     }
-
-# Retain helper for legacy external imports if needed, though they shouldn't be used
-def _strip_client_only_mods(root: Path, instance_id: Optional[str] = None) -> None:
-    # Moved to ModrinthProvider but keeping for compatibility if any other module imports it
-    pass 

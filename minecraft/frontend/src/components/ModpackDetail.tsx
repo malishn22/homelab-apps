@@ -5,7 +5,7 @@ import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import type { Modpack, ModpackSource, ServerVersionOption, Server, InstallRequestOptions } from '../types';
 import { ArrowLeft, Download, Package, Tag, Server as ServerIcon, Users, Sparkles, Clock, CheckCircle2, X, MemoryStick, Plus } from 'lucide-react';
-import { fetchServerFiles, ServerVersion } from '../src/api/modpacks';
+import { fetchServerFiles, ServerVersion } from '../api/modpacks';
 
 interface ModpackDetailProps {
     modpack: Modpack;
