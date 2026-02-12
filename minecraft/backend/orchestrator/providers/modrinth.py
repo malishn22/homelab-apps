@@ -55,6 +55,9 @@ class ModrinthProvider(ModpackProvider):
             
         # Always strip client-only mods, as metadata is often incorrect
         self._strip_client_only_mods(extract_dir)
+        # Loader-aware strip: strip opposite loader mods
+        loader = self._detect_loader_from_index(extract_dir)
+        self._strip_loader_mismatch_mods(extract_dir, loader)
         mc_version = self._detect_minecraft_version_from_root(extract_dir)
             
         return extract_dir, mc_version
@@ -68,79 +71,140 @@ class ModrinthProvider(ModpackProvider):
         version_hint: Optional[str] = None
     ) -> Tuple[List[str], Optional[str]]:
         
-        from ..utils import detect_generic_start_command
-        
-        # Try generic detection
-        cmd, entry = detect_generic_start_command(root, ram_mb, instance_id=self.instance_id)
-        if cmd:
-            return cmd, entry
+        from ..utils import detect_generic_start_command, _find_unix_args_path
 
-        # Fallback: Check if we need to download a Forge installer based on modrinth.index.json
-        installer = self._maybe_fetch_forge_installer(root)
+        # When index explicitly specifies forge/neoforge, prefer our installer to ensure correct loader
+        # (generic scripts may install the wrong loader and cause mod mismatch crashes)
+        installer, loader = self._maybe_fetch_forge_or_neoforge_installer(root)
         if installer and installer.exists():
              rel_installer = installer.relative_to(root)
              rel_dir = rel_installer.parent.as_posix()
              cd_prefix = f"cd {rel_dir} && " if rel_dir and rel_dir != "." else ""
              
-             # Basic install + run command for Forge
+             # Basic install + run command
              install_cmd = f"{cd_prefix}java -jar {rel_installer.name} --installServer"
              
-             # Attempt to guess run command after install
-             # Use M suffix for MB
-             run_cmd = f"{cd_prefix}java -Xms{ram_mb}M -Xmx{ram_mb}M -jar {rel_installer.name} nogui" 
-             
-             forge_version = ""
              name = rel_installer.name
-             if "forge-" in name and "-installer" in name:
-                # e.g. forge-1.20.1-47.1.0-installer.jar -> 1.20.1-47.1.0
-                forge_version = name.split("forge-", 1)[1].rsplit("-installer", 1)[0]
+             run_cmd = f"{cd_prefix}java -Xms{ram_mb}M -Xmx{ram_mb}M -jar {name} nogui"
              
-             if forge_version:
-                 run_cmd = (
-                    f"{cd_prefix}if [ -f libraries/net/minecraftforge/forge/{forge_version}/unix_args.txt ]; then "
-                    f"if [ ! -f user_jvm_args.txt ]; then "
-                    f": > user_jvm_args.txt; fi; "
-                    f"java @user_jvm_args.txt @libraries/net/minecraftforge/forge/{forge_version}/unix_args.txt nogui; "
-                    f"else java -Xms{ram_mb}M -Xmx{ram_mb}M -jar {name} nogui; fi"
-                )
+             if "neoforge-" in name and "-installer" in name:
+                unix_args_path = _find_unix_args_path(root)
+                if unix_args_path:
+                    run_cmd = (
+                        f"{cd_prefix}if [ -f {unix_args_path} ]; then "
+                        f"if [ ! -f user_jvm_args.txt ]; then : > user_jvm_args.txt; fi; "
+                        f"java @user_jvm_args.txt @{unix_args_path} nogui; "
+                        f"else java -Xms{ram_mb}M -Xmx{ram_mb}M -jar {name} nogui; fi"
+                    )
+                else:
+                    # e.g. neoforge-21.1.168-installer.jar -> 21.1.168
+                    neoforge_version = name.split("neoforge-", 1)[1].rsplit("-installer", 1)[0]
+                    neoforge_jar = f"neoforge-{neoforge_version}.jar"
+                    run_cmd = (
+                        f"{cd_prefix}if [ -f libraries/net/neoforged/neoforge/{neoforge_version}/unix_args.txt ]; then "
+                        f"if [ ! -f user_jvm_args.txt ]; then : > user_jvm_args.txt; fi; "
+                        f"java @user_jvm_args.txt @libraries/net/neoforged/neoforge/{neoforge_version}/unix_args.txt nogui; "
+                        f"elif [ -f {neoforge_jar} ]; then "
+                        f"java -Xms{ram_mb}M -Xmx{ram_mb}M -jar {neoforge_jar} nogui; "
+                        f"else java -Xms{ram_mb}M -Xmx{ram_mb}M -jar {name} nogui; fi"
+                    )
+             elif "forge-" in name and "-installer" in name:
+                unix_args_path = _find_unix_args_path(root)
+                if unix_args_path:
+                    run_cmd = (
+                        f"{cd_prefix}if [ -f {unix_args_path} ]; then "
+                        f"if [ ! -f user_jvm_args.txt ]; then : > user_jvm_args.txt; fi; "
+                        f"java @user_jvm_args.txt @{unix_args_path} nogui; "
+                        f"else java -Xms{ram_mb}M -Xmx{ram_mb}M -jar {name} nogui; fi"
+                    )
+                else:
+                    # e.g. forge-1.20.1-47.1.0-installer.jar -> 1.20.1-47.1.0
+                    forge_version = name.split("forge-", 1)[1].rsplit("-installer", 1)[0]
+                    forge_jar = f"forge-{forge_version}.jar"
+                    forge_universal = f"forge-{forge_version}-universal.jar"
+                    run_cmd = (
+                        f"{cd_prefix}if [ -f libraries/net/minecraftforge/forge/{forge_version}/unix_args.txt ]; then "
+                        f"if [ ! -f user_jvm_args.txt ]; then : > user_jvm_args.txt; fi; "
+                        f"java @user_jvm_args.txt @libraries/net/minecraftforge/forge/{forge_version}/unix_args.txt nogui; "
+                        f"elif [ -f {forge_jar} ]; then "
+                        f"java -Xms{ram_mb}M -Xmx{ram_mb}M -jar {forge_jar} nogui; "
+                        f"elif [ -f {forge_universal} ]; then "
+                        f"java -Xms{ram_mb}M -Xmx{ram_mb}M -jar {forge_universal} nogui; "
+                        f"else java -Xms{ram_mb}M -Xmx{ram_mb}M -jar {name} nogui; fi"
+                    )
 
              return ["/bin/bash", "-c", f"{install_cmd} && {run_cmd}"], rel_installer.as_posix()
-            
+
+        # Fallback: generic detection (scripts, jars, etc.)
+        cmd, entry = detect_generic_start_command(root, ram_mb, instance_id=self.instance_id)
+        if cmd:
+            return cmd, entry
+
         raise OrchestratorError("Could not detect start command in server pack")
 
-    def _maybe_fetch_forge_installer(self, root: Path) -> Optional[Path]:
+    def _detect_loader_from_index(self, root: Path) -> Optional[str]:
+        """Return 'forge', 'neoforge', or None based on modrinth.index.json dependencies."""
         index_path = root / "modrinth.index.json"
         if not index_path.exists():
             return None
-        
         try:
             manifest = json.loads(index_path.read_text())
         except Exception:
             return None
-            
+        deps = manifest.get("dependencies") or {}
+        if deps.get("neoforge"):
+            return "neoforge"
+        if deps.get("forge"):
+            return "forge"
+        return None
+
+    def _maybe_fetch_forge_or_neoforge_installer(self, root: Path) -> Tuple[Optional[Path], Optional[str]]:
+        """Return (installer_path, loader) with loader in ('forge','neoforge')."""
+        index_path = root / "modrinth.index.json"
+        if not index_path.exists():
+            return None, None
+        try:
+            manifest = json.loads(index_path.read_text())
+        except Exception:
+            return None, None
         deps = manifest.get("dependencies") or {}
         mc_version = deps.get("minecraft")
-        forge_version = deps.get("forge") or deps.get("neoforge")
-        
-        if not mc_version or not forge_version:
-            return None
-            
-        version_str = f"{mc_version}-{forge_version}"
-        installer_name = f"forge-{version_str}-installer.jar"
-        installer = root / installer_name
-        
-        if installer.exists():
-            return installer
-            
-        url = f"https://maven.minecraftforge.net/net/minecraftforge/forge/{version_str}/{installer_name}"
-        
-        try:
-            _log_line(self.instance_id, f"[PREP] Downloading Forge installer {installer_name}")
-            self._download(url, installer)
-            return installer
-        except Exception as exc:
-            _log_line(self.instance_id, f"[PREP] Failed to download Forge installer: {exc}")
-            return None
+
+        # NeoForge first
+        neoforge_version = deps.get("neoforge")
+        if neoforge_version:
+            version_str = neoforge_version  # e.g. 21.1.168
+            installer_name = f"neoforge-{version_str}-installer.jar"
+            installer = root / installer_name
+            if installer.exists():
+                return installer, "neoforge"
+            url = f"https://maven.neoforged.net/releases/net/neoforged/neoforge/{version_str}/{installer_name}"
+            try:
+                _log_line(self.instance_id, f"[PREP] Downloading NeoForge installer {installer_name}")
+                self._download(url, installer)
+                return installer, "neoforge"
+            except Exception as exc:
+                _log_line(self.instance_id, f"[PREP] Failed to download NeoForge installer: {exc}")
+                return None, "neoforge"
+
+        # Forge second
+        forge_version = deps.get("forge")
+        if mc_version and forge_version:
+            version_str = f"{mc_version}-{forge_version}"
+            installer_name = f"forge-{version_str}-installer.jar"
+            installer = root / installer_name
+            if installer.exists():
+                return installer, "forge"
+            url = f"https://maven.minecraftforge.net/net/minecraftforge/forge/{version_str}/{installer_name}"
+            try:
+                _log_line(self.instance_id, f"[PREP] Downloading Forge installer {installer_name}")
+                self._download(url, installer)
+                return installer, "forge"
+            except Exception as exc:
+                _log_line(self.instance_id, f"[PREP] Failed to download Forge installer: {exc}")
+                return None, "forge"
+
+        return None, None
 
     # --- Helpers ---
 
@@ -213,6 +277,45 @@ class ModrinthProvider(ModpackProvider):
             target = root / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(item, target)
+
+    def _strip_loader_mismatch_mods(self, root: Path, loader: Optional[str]) -> None:
+        """
+        Strip mods incompatible with the detected loader.
+        - forge: strip NeoForge mods (neoforge in name, not forge)
+        - neoforge: strip Forge mods (forge in name, not neoforge)
+        - None: strip NeoForge mods defensively (packs often end up with Forge from generic scripts)
+        """
+        mods_dir = root / "mods"
+        if not mods_dir.exists():
+            return
+        removed_dir = mods_dir / "__loader_mismatch_removed"
+        removed_dir.mkdir(parents=True, exist_ok=True)
+        for jar in mods_dir.rglob("*.jar"):
+            if "__loader_mismatch_removed" in jar.parts:
+                continue
+            name_lower = jar.name.lower()
+            if loader in ("forge", None):
+                # Strip NeoForge mods (when None, assume Forge - generic scripts often install Forge)
+                if "neoforge" in name_lower and "forge" not in name_lower.replace("neoforge", ""):
+                    try:
+                        target = removed_dir / jar.name
+                        if target.exists():
+                            target.unlink()
+                        jar.rename(target)
+                        _log_line(self.instance_id, f"[PREP] Removed NeoForge mod (incompatible with Forge): {jar.name}")
+                    except Exception as exc:
+                        _log_line(self.instance_id, f"[PREP] Failed to remove {jar.name}: {exc}")
+            elif loader == "neoforge":
+                # Strip Forge mods (forge in name but not neoforge)
+                if "forge" in name_lower and "neoforge" not in name_lower:
+                    try:
+                        target = removed_dir / jar.name
+                        if target.exists():
+                            target.unlink()
+                        jar.rename(target)
+                        _log_line(self.instance_id, f"[PREP] Removed Forge mod (incompatible with NeoForge): {jar.name}")
+                    except Exception as exc:
+                        _log_line(self.instance_id, f"[PREP] Failed to remove {jar.name}: {exc}")
 
     def _strip_client_only_mods(self, root: Path) -> None:
         mods_dir = root / "mods"

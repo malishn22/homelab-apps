@@ -5,7 +5,6 @@ import { Play, Square, Settings, Users, Activity, Plus, Trash } from 'lucide-rea
 interface ServerListProps {
     servers?: Server[];
     compact?: boolean;
-    activeServerId?: string | null;
     onSelectServer: (serverId: string) => void;
     onCreateServer?: () => void;
     onUpdateServer?: (serverId: string, updates: Partial<Server>) => void;
@@ -18,7 +17,6 @@ interface ServerListProps {
 const ServerList: React.FC<ServerListProps> = ({
     servers = [],
     compact = false,
-    activeServerId = null,
     onSelectServer,
     onCreateServer,
     onUpdateServer,
@@ -41,13 +39,24 @@ const ServerList: React.FC<ServerListProps> = ({
         }
     };
     const getStatsForServer = (server: Server): ServerStats | undefined => statsById[server.id];
-    const getRamUsage = (server: Server) => {
+    const getRamUsage = (server: Server): number | undefined => {
         const stats = getStatsForServer(server);
-        return typeof stats?.ramUsage === 'number' ? stats.ramUsage : server.ramUsage;
+        if (!stats?.hasReceivedStatus) return undefined;
+        return typeof stats.ramUsage === 'number' ? stats.ramUsage : 0;
     };
     const getRamLimit = (server: Server) => {
         const stats = getStatsForServer(server);
         return typeof stats?.ramTotal === 'number' ? stats.ramTotal : server.ramLimit;
+    };
+    const getPlayers = (server: Server): number | undefined => {
+        const stats = getStatsForServer(server);
+        if (!stats?.hasReceivedStatus) return undefined;
+        return typeof stats.players === 'number' ? stats.players : 0;
+    };
+    const getMaxPlayers = (server: Server): number | undefined => {
+        const stats = getStatsForServer(server);
+        if (!stats?.hasReceivedStatus) return undefined;
+        return typeof stats.maxPlayers === 'number' ? stats.maxPlayers : 5;
     };
 
     return (
@@ -75,7 +84,7 @@ const ServerList: React.FC<ServerListProps> = ({
                     {servers.map((server) => {
                         const ramUsage = getRamUsage(server);
                         const ramLimit = getRamLimit(server);
-                        const ramPercent = ramLimit > 0 ? Math.min(100, (ramUsage / ramLimit) * 100) : 0;
+                        const ramPercent = ramLimit > 0 && typeof ramUsage === 'number' ? Math.min(100, (ramUsage / ramLimit) * 100) : 0;
                         const isOnline = server.status === 'ONLINE';
                         const isStarting = server.status === 'STARTING';
                         const isPreparing = server.status === 'PREPARING';
@@ -108,7 +117,9 @@ const ServerList: React.FC<ServerListProps> = ({
                                         <Users size={14} /> Players
                                     </div>
                                     <div className="text-lg font-semibold text-white">
-                                        {server.players} <span className="text-sm text-text-dim">/ {server.maxPlayers}</span>
+                                        {getPlayers(server) !== undefined && getMaxPlayers(server) !== undefined
+                                            ? `${getPlayers(server)} / ${getMaxPlayers(server)}`
+                                            : '– / –'}
                                     </div>
                                 </div>
                                 <div className="bg-bg-body/30 p-3 rounded-xl border border-white/5">
@@ -116,7 +127,7 @@ const ServerList: React.FC<ServerListProps> = ({
                                         <Activity size={14} /> RAM
                                     </div>
                                     <div className="text-lg font-semibold text-white">
-                                        {Number.isFinite(ramUsage) ? ramUsage.toFixed(1) : ramUsage} <span className="text-sm text-text-dim">GB</span>
+                                        {typeof ramUsage === 'number' && Number.isFinite(ramUsage) ? `${ramUsage.toFixed(1)} GB` : '–'}
                                     </div>
                                     <div className="w-full h-1 bg-bg-surface rounded-full mt-2 overflow-hidden">
                                         <div 
@@ -178,33 +189,40 @@ const ServerList: React.FC<ServerListProps> = ({
                     <div className="absolute -left-16 -top-16 w-64 h-64 bg-primary/10 rounded-full blur-3xl"></div>
                     <div className="absolute -right-16 -bottom-16 w-64 h-64 bg-accent/10 rounded-full blur-3xl"></div>
                     <div className="relative z-10">
+                        {(() => {
+                            const displayServer = servers.find((s) => s.id === editing.id) ?? editing;
+                            return (
                         <div className="flex items-start justify-between mb-6 gap-4">
                             <div>
                                 <div className="text-sm uppercase tracking-wide text-text-dim">Server Details</div>
                                 <div className="text-2xl font-bold text-white mt-1">{editing.name}</div>
                                 <div className="text-xs text-text-muted mt-2 space-x-2">
                                     <span>ID: {editing.id}</span>
-                                    <span>• Players {editing.players}/{editing.maxPlayers}</span>
-                                    <span>
-                                        • RAM {Number.isFinite(getRamUsage(editing)) ? getRamUsage(editing).toFixed(1) : getRamUsage(editing)}
-                                        /{getRamLimit(editing)} GB
-                                    </span>
+                                    <span>• Players {getPlayers(displayServer) !== undefined && getMaxPlayers(displayServer) !== undefined
+                                        ? `${getPlayers(displayServer)}/${getMaxPlayers(displayServer)}`
+                                        : '–/–'}</span>
+                                    <span>• RAM {(() => {
+                                        const ru = getRamUsage(displayServer);
+                                        return typeof ru === 'number' && Number.isFinite(ru) ? `${ru.toFixed(1)}/${getRamLimit(displayServer)} GB` : '–';
+                                    })()}</span>
                                 </div>
                             </div>
                             <div className="flex flex-col items-end gap-2">
                                 <div className="px-3 py-1.5 rounded-full border border-border-main bg-white/5 text-xs text-text-muted">
-                                    Status: <span className="text-white font-semibold">{editing.status}</span>
+                                    Status: <span className="text-white font-semibold">{displayServer.status}</span>
                                 </div>
                                 <div className="flex flex-wrap justify-end gap-2 text-xs">
                                     <span className="px-3 py-1 rounded-full border border-primary/30 bg-primary/10 text-primary font-semibold capitalize shadow-glow shadow-primary/10">
-                                        {editing.type}
+                                        {displayServer.type}
                                     </span>
                                     <span className="px-3 py-1 rounded-full border border-border-main bg-white/5 text-white font-semibold shadow-[0_4px_12px_rgba(0,0,0,0.25)]">
-                                        v{editing.version}
+                                        v{displayServer.version}
                                     </span>
                                 </div>
                             </div>
                         </div>
+                            );
+                        })()}
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="space-y-2 md:col-span-2">
@@ -257,18 +275,6 @@ const ServerList: React.FC<ServerListProps> = ({
                                 }}
                             >
                                 Cancel
-                            </button>
-                            <button
-                                className="px-5 py-2.5 rounded-lg bg-red-500/10 text-red-300 font-semibold hover:bg-red-500/20 border border-red-500/30 transition-colors"
-                                onClick={() => {
-                                    if (editing && window.confirm(`Delete server "${editing.name}"? This cannot be undone.`)) {
-                                        onDeleteServer?.(editing.id);
-                                        setEditing(null);
-                                        setEditForm({});
-                                    }
-                                }}
-                            >
-                                Delete
                             </button>
                             <button
                                 className="px-5 py-2.5 rounded-lg bg-primary text-white font-semibold hover:bg-primary/90 transition-colors"

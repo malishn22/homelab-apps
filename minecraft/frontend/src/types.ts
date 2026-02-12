@@ -69,6 +69,10 @@ export interface ServerStats {
   tps: number | null; // ticks per second
   tickTimeMs?: number | null;
   status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'STOPPING' | 'MAINTENANCE' | 'PREPARING' | 'ERROR';
+  players?: number;
+  maxPlayers?: number;
+  /** True after we received a status API response; until then players/maxPlayers are unknown */
+  hasReceivedStatus?: boolean;
 }
 
 export interface Server {

@@ -58,6 +58,7 @@ STATUS_STOPPING = "STOPPING"
 STATUS_ONLINE = "ONLINE"
 STATUS_ERROR = "ERROR"
 TPS_POLL_SECONDS = int(os.environ.get("MINECRAFT_TPS_POLL_SECONDS", "30"))
+PING_HOST = os.environ.get("MINECRAFT_PING_HOST", "host.docker.internal")
 
 LEGACY_JVM_ARGS_LINES = {
     "-XX:+UseG1GC",
@@ -120,9 +121,9 @@ def _select_java_image(
 ) -> str:
     mc_version = instance.get("minecraft_version")
     if not mc_version:
-        mc_version = _parse_minecraft_version(instance.get("version_number"))
-    if not mc_version:
         mc_version = detect_minecraft_version_from_root(server_dir, source=source)
+    if not mc_version:
+        mc_version = _parse_minecraft_version(instance.get("version_number"))
     if mc_version and mc_version != instance.get("minecraft_version"):
         instance["minecraft_version"] = mc_version
         upsert_instance(instance)
@@ -172,14 +173,62 @@ def _parse_tps_from_logs(raw: str) -> Optional[float]:
     return None
 
 
+def _ping_server_players(host: str, port: int) -> Optional[Tuple[int, int]]:
+    """Use Server List Ping (Java 1.7+) to get players online/max. Returns (online, max) or None."""
+    try:
+        from mcstatus import JavaServer
+        server = JavaServer(host, port)
+        status = server.status()
+        return (status.players.online, status.players.max)
+    except Exception:
+        return None
+
+
+def _read_max_players_from_properties(server_dir: Path) -> Optional[int]:
+    """Read max-players from server.properties. Returns None if not found or invalid."""
+    props_path = server_dir / "server.properties"
+    if not props_path.exists():
+        return None
+    try:
+        text = props_path.read_text(errors="ignore")
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            if key.strip().lower() == "max-players":
+                v = val.strip()
+                if v.isdigit():
+                    return int(v)
+                return None
+    except Exception:
+        pass
+    return None
+
+
 def _parse_tick_time_from_logs(raw: str) -> Optional[float]:
     lines = raw.splitlines()
-    overall_re = re.compile(r"overall\s*:\s*mean tick time:\s*([0-9]+(?:\.[0-9]+)?)\s*ms", re.I)
+    # NeoForge/Forge format: "Overall: 20.000 TPS (0.698 ms/tick)"
+    overall_ms_tick_re = re.compile(
+        r"overall\s*:.*?\(\s*([0-9]+(?:\.[0-9]+)?)\s*ms/tick\s*\)", re.I
+    )
+    # Legacy format: "overall : mean tick time: X.XXX ms"
+    overall_mean_re = re.compile(
+        r"overall\s*:\s*mean tick time:\s*([0-9]+(?:\.[0-9]+)?)\s*ms", re.I
+    )
     generic_re = re.compile(r"mean tick time:\s*([0-9]+(?:\.[0-9]+)?)\s*ms", re.I)
+    # Fallback: any "X.XXX ms/tick" (prefer Overall line)
+    any_ms_tick_re = re.compile(r"\(\s*([0-9]+(?:\.[0-9]+)?)\s*ms/tick\s*\)", re.I)
     best: Optional[float] = None
 
     for line in reversed(lines):
-        match = overall_re.search(line)
+        match = overall_ms_tick_re.search(line)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                continue
+        match = overall_mean_re.search(line)
         if match:
             try:
                 return float(match.group(1))
@@ -191,12 +240,23 @@ def _parse_tick_time_from_logs(raw: str) -> Optional[float]:
                 best = float(match.group(1))
             except ValueError:
                 continue
+        match = any_ms_tick_re.search(line)
+        if match and best is None:
+            try:
+                best = float(match.group(1))
+            except ValueError:
+                continue
     return best
 
 
 def _should_hide_perf_line(line: str) -> bool:
+    """Hide TPS/dimension perf spam from forge tps / neoforge tps output."""
     lower = line.lower()
-    return "mean tick time" in lower and "mean tps" in lower
+    if "mean tick time" in lower and "mean tps" in lower:
+        return True
+    if "tps" in lower and "ms/tick" in lower:
+        return True
+    return False
 
 
 def _should_poll_tps(instance: Dict, server_dir: Path) -> bool:
@@ -205,9 +265,25 @@ def _should_poll_tps(instance: Dict, server_dir: Path) -> bool:
         return True
     if (server_dir / "libraries" / "net" / "minecraftforge" / "forge").exists():
         return True
+    if (server_dir / "libraries" / "net" / "neoforged" / "neoforge").exists():
+        return True
     if any(server_dir.glob("forge-*.jar")):
         return True
+    if any(server_dir.glob("neoforge-*.jar")):
+        return True
     return False
+
+
+def _tps_command_for_instance(instance: Dict, server_dir: Path) -> str:
+    """Return the TPS console command for the instance's loader (forge tps or neoforge tps)."""
+    loader = (instance.get("loader") or "").lower()
+    if "neoforge" in loader:
+        return "neoforge tps"
+    if (server_dir / "libraries" / "net" / "neoforged" / "neoforge").exists():
+        return "neoforge tps"
+    if any(server_dir.glob("neoforge-*.jar")):
+        return "neoforge tps"
+    return "forge tps"
 
 
 def _send_container_command(container, command: str) -> None:
@@ -311,6 +387,20 @@ def _container_for(instance: Dict):
         return client.containers.get(instance["container_name"])
     except DockerNotFound:
         return None
+
+
+def _wrap_command_for_java(cmd: List[str]) -> List[str]:
+    """
+    When the command runs a .sh script, prepend export JAVA_HOME and PATH
+    so scripts use container Java instead of any bundled Java.
+    """
+    if len(cmd) < 2 or cmd[0] not in ("/bin/bash", "/bin/sh", "bash", "sh"):
+        return cmd
+    inner = cmd[-1]
+    if not inner or ".sh" not in inner or "./" not in inner:
+        return cmd
+    java_prefix = "export JAVA_HOME=/opt/java/openjdk PATH=/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin && "
+    return cmd[:-1] + [java_prefix + inner]
 
 
 def _container_ready(container) -> bool:
@@ -428,10 +518,18 @@ def start_instance(instance_id: str) -> Dict:
         "EULA": "TRUE",
         "INIT_MEMORY": f"{ram_mb}M",
         "MAX_MEMORY": f"{ram_mb}M",
+        "JAVA_HOME": "/opt/java/openjdk",
+        "PATH": "/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     }
     image = _select_java_image(instance, server_dir_container, source_key, instance_id)
+    cmd = _wrap_command_for_java(cmd)
 
     _log_line(instance_id, "[INFO] Starting server container…")
+    try:
+        client.images.pull(image)
+    except Exception as exc:
+        log.warning("Failed to pull image %s: %s", image, exc)
+        raise OrchestratorError(f"Failed to pull Java image {image}: {exc}") from exc
     try:
         container = client.containers.run(
             image=image,
@@ -500,18 +598,22 @@ def instance_status(instance_id: str) -> Dict:
                 "cpuLoad": 0.0,
                 "tps": None,
                 "tickTimeMs": None,
+                "players": 0,
+                "maxPlayers": 20,
             },
         }
 
     status = instance.get("status", "OFFLINE")
+    server_dir_container, server_dir_host = _server_run_dirs(instance_id)
     stats = {
         "ramUsage": 0,
         "ramTotal": round((instance.get("ram_mb", 0) or 0) / 1024, 2),
         "cpuLoad": 0.0,
         "tps": None,
         "tickTimeMs": None,
+        "players": 0,
+        "maxPlayers": _read_max_players_from_properties(server_dir_host) or 20,
     }
-    server_dir_container, _ = _server_run_dirs(instance_id)
 
     container = _container_for(instance)
 
@@ -583,29 +685,47 @@ def instance_status(instance_id: str) -> Dict:
         log.warning("Failed to read stats for %s: %s", instance_id, exc)
 
     # TPS (optional): poll via console command and parse logs
+    max_from_props = _read_max_players_from_properties(server_dir_host)
     try:
         now = time.time()
         last_tps_at = instance.get("last_tps_at", 0) or 0
-        last_request_at = instance.get("last_tps_request_at", 0) or 0
+        last_tps_request_at = instance.get("last_tps_request_at", 0) or 0
         last_tick_at = instance.get("last_tick_time_at", 0) or 0
-        if running and status in {"ONLINE", "STARTING"} and _should_poll_tps(instance, server_dir_container):
-            if now - last_request_at >= TPS_POLL_SECONDS:
-                tps_cmd = "forge tps" if "forge" in (instance.get("loader") or "").lower() else "tps"
+        if running and status in {"ONLINE", "STARTING"}:
+            send_tps = (
+                now - last_tps_request_at >= TPS_POLL_SECONDS
+                and _should_poll_tps(instance, server_dir_container)
+            )
+            if send_tps:
+                tps_cmd = _tps_command_for_instance(instance, server_dir_container)
                 _send_container_command(container, tps_cmd)
                 instance["last_tps_request_at"] = now
                 upsert_instance(instance)
-            raw_logs = container.logs(tail=200).decode("utf-8", errors="ignore")
-            parsed_tps = _parse_tps_from_logs(raw_logs)
-            parsed_tick = _parse_tick_time_from_logs(raw_logs)
-            if parsed_tps is not None:
-                instance["last_tps"] = parsed_tps
-                instance["last_tps_at"] = now
-                upsert_instance(instance)
-            if parsed_tick is not None:
-                instance["last_tick_time_ms"] = parsed_tick
-                instance["last_tick_time_at"] = now
-                upsert_instance(instance)
+                time.sleep(0.8)  # allow server to process command and write to stdout
+            if send_tps:
+                raw_logs = container.logs(tail=200).decode("utf-8", errors="ignore")
+                parsed_tps = _parse_tps_from_logs(raw_logs) if _should_poll_tps(instance, server_dir_container) else None
+                parsed_tick = _parse_tick_time_from_logs(raw_logs) if _should_poll_tps(instance, server_dir_container) else None
+                if parsed_tps is not None:
+                    instance["last_tps"] = parsed_tps
+                    instance["last_tps_at"] = now
+                    upsert_instance(instance)
+                if parsed_tick is not None:
+                    instance["last_tick_time_ms"] = parsed_tick
+                    instance["last_tick_time_at"] = now
+                    upsert_instance(instance)
         stats["tps"] = instance.get("last_tps")
+        if running and status in {"ONLINE", "STARTING"}:
+            ping_result = _ping_server_players(PING_HOST, instance.get("port", 25565))
+            if ping_result is not None:
+                stats["players"] = ping_result[0]
+                stats["maxPlayers"] = ping_result[1]
+            else:
+                stats["players"] = 0
+                stats["maxPlayers"] = max_from_props or 20
+        else:
+            stats["players"] = 0
+            stats["maxPlayers"] = max_from_props or 20
         stats["tickTimeMs"] = instance.get("last_tick_time_ms")
         if last_tps_at and now - last_tps_at > max(TPS_POLL_SECONDS * 2, 120):
             stats["tps"] = None

@@ -16,7 +16,7 @@ from config import (
     MODRINTH_BASE_URL,
     MODRINTH_USER_AGENT,
 )
-from db import (
+from services.memory_cache import (
     clear_search_cache,
     get_curseforge_server_pack_cache,
     get_search_cache,
@@ -371,6 +371,50 @@ def _collect_curseforge_server_pack_entries(
     return list(entries.values())
 
 
+def _quick_check_curseforge_server_pack(mod_id: int, max_entries: int = 3) -> bool:
+    """
+    Lightweight check for server pack: fetch first page of files, inspect only
+    the first max_entries (latest versions). Mark as client-only if not found.
+    Used for search results; full scan still used for server-files endpoint.
+    """
+    cached_db = get_curseforge_server_pack_cache(
+        mod_id, CURSEFORGE_SERVER_PACK_TTL_SECONDS
+    )
+    if cached_db is not None:
+        return bool(cached_db.get("has_server_pack"))
+    cached = get_curseforge_cached_server_pack(mod_id)
+    if cached is not None:
+        return cached
+    try:
+        resp = requests.get(
+            f"{CURSEFORGE_BASE_URL}/mods/{mod_id}/files",
+            headers={"x-api-key": CURSEFORGE_API_KEY},
+            params={"pageSize": max(3, max_entries), "index": 0},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        batch = data.get("data") or []
+        for entry in batch[:max_entries]:
+            name = (entry.get("fileName") or entry.get("displayName") or "").lower()
+            if entry.get("isServerPack") is True or _is_curseforge_server_pack_name(name):
+                set_curseforge_server_pack_cache(mod_id, True, None)
+                set_curseforge_cached_server_pack(mod_id, True)
+                return True
+        for entry in batch[:2]:
+            found, _ = _find_additional_server_files(mod_id, entry)
+            if found:
+                set_curseforge_server_pack_cache(mod_id, True, None)
+                set_curseforge_cached_server_pack(mod_id, True)
+                return True
+        has_server_pack = False
+        set_curseforge_server_pack_cache(mod_id, has_server_pack, None)
+        set_curseforge_cached_server_pack(mod_id, has_server_pack)
+        return has_server_pack
+    except Exception:
+        return False
+
+
 def _scan_curseforge_files_for_server_pack(
     mod_id: int, page_size: int = 200, max_pages: int = 20
 ) -> bool:
@@ -480,7 +524,7 @@ def _curseforge_has_server_pack(
     if detail_payload and _has_curseforge_server_pack(detail_payload):
         return True
     try:
-        return _scan_curseforge_files_for_server_pack(int(mod_id))
+        return _quick_check_curseforge_server_pack(int(mod_id))
     except Exception:
         return False
 
@@ -563,7 +607,7 @@ def _build_curseforge_server_files(mod_id: int, force: bool = False) -> Dict[str
                 }
 
     entries = _collect_curseforge_server_pack_entries(
-        mod_id, max_pages=None, additional_scan_limit=None
+        mod_id, max_pages=1, additional_scan_limit=3
     )
     versions: List[Dict[str, Any]] = []
     for entry in entries:
@@ -582,6 +626,7 @@ def _build_curseforge_server_files(mod_id: int, force: bool = False) -> Dict[str
             "files": [{"filename": entry.get("fileName"), "url": entry.get("downloadUrl")}],
         })
     versions.sort(key=lambda v: _parse_timestamp(v.get("date_published")), reverse=True)
+    versions = versions[:10]
     available = len(versions) > 0
     set_curseforge_server_pack_cache(mod_id, available, versions)
     return {"available": available, "versions": versions}
@@ -746,4 +791,9 @@ def get_modpack_server_files(
             "files": server_files,
         })
     available = any(v.get("server_supported") for v in version_entries)
+    # Sort by date (newest first) and limit to last 10 server files
+    version_entries.sort(
+        key=lambda v: _parse_timestamp(v.get("date_published")), reverse=True
+    )
+    version_entries = version_entries[:10]
     return {"available": available, "versions": version_entries}

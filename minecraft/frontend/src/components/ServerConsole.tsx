@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { LogLevel } from '../types';
 import type { LogEntry, ServerStats, Server } from '../types';
-import { Square, RefreshCw, Cpu, HardDrive, Terminal, ChevronRight, Play } from 'lucide-react';
+import { Square, RefreshCw, Cpu, HardDrive, Terminal, ChevronRight, Play, ArrowDownToLine, Move } from 'lucide-react';
 
 interface ServerConsoleProps {
     server: Server | null;
@@ -15,18 +15,48 @@ interface ServerConsoleProps {
 
 const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats, onStart, onStop, onRestart, onSendCommand }) => {
     const consoleEndRef = useRef<HTMLDivElement>(null);
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const isProgrammaticScrollRef = useRef(false);
     const [command, setCommand] = useState('');
+    const [autoScroll, setAutoScroll] = useState(true);
     const effectiveStats: ServerStats = stats || {
         ramUsage: server?.ramUsage ?? 0,
         ramTotal: server?.ramLimit ?? 0,
         cpuLoad: 0,
         tps: null,
+        tickTimeMs: null,
         status: (server?.status as ServerStats['status']) || 'OFFLINE',
     };
 
     useEffect(() => {
+        if (autoScroll) {
+            isProgrammaticScrollRef.current = true;
+            consoleEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            const t = setTimeout(() => {
+                isProgrammaticScrollRef.current = false;
+            }, 450);
+            return () => clearTimeout(t);
+        }
+    }, [logs.length, server?.id, autoScroll]);
+
+    const handleScroll = () => {
+        if (isProgrammaticScrollRef.current) return;
+        const el = scrollContainerRef.current;
+        if (!el) return;
+        const { scrollTop, clientHeight, scrollHeight } = el;
+        if (scrollTop + clientHeight < scrollHeight - 50) {
+            setAutoScroll(false);
+        }
+    };
+
+    const handleFollowClick = () => {
+        setAutoScroll(true);
+        isProgrammaticScrollRef.current = true;
         consoleEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [logs.length, server?.id]);
+        setTimeout(() => {
+            isProgrammaticScrollRef.current = false;
+        }, 450);
+    };
 
     const isOnline = server?.status === 'ONLINE';
     const isStarting = server?.status === 'STARTING';
@@ -277,10 +307,27 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
                          <div className="w-3 h-3 rounded-full bg-yellow-500/50"></div>
                          <div className="w-3 h-3 rounded-full bg-emerald-500/50"></div>
                     </div>
+                    <button
+                        type="button"
+                        onClick={handleFollowClick}
+                        title={autoScroll ? 'Following output (click to toggle)' : 'Free scroll (click to follow)'}
+                        className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors ${
+                            autoScroll
+                                ? 'bg-accent/20 text-accent hover:bg-accent/30'
+                                : 'bg-white/10 text-text-muted hover:bg-white/15 hover:text-gray-300'
+                        }`}
+                    >
+                        {autoScroll ? <ArrowDownToLine size={14} /> : <Move size={14} />}
+                        <span className="hidden sm:inline">{autoScroll ? 'Follow' : 'Free'}</span>
+                    </button>
                 </div>
 
                 {/* Log Output */}
-                <div className="flex-1 overflow-y-auto p-4 font-mono text-xs leading-5 console-scrollbar space-y-1">
+                <div
+                    ref={scrollContainerRef}
+                    onScroll={handleScroll}
+                    className="flex-1 overflow-y-auto p-4 font-mono text-xs leading-5 console-scrollbar space-y-1"
+                >
                     {logs.map((log) => (
                         <div key={log.id} className="break-all font-medium">
                             <span className="text-text-dim select-none mr-2">{log.timestamp}</span>

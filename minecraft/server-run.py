@@ -66,9 +66,9 @@ def run_steps(target: str | None, aggressive_prune: bool = False) -> int:
             print(f"✖ Command failed with code {exc.returncode}: {' '.join(cmd)}")
             return exc.returncode
 
-        # After docker compose down (first command), prune unused Docker data
-        if idx == 0:
-            prune_docker(aggressive=aggressive_prune)
+        # After docker compose down (first command), optionally prune (only if --prune passed)
+        if idx == 0 and aggressive_prune:
+            prune_docker(aggressive=True)
 
     print("✓ Minecraft stack rebuilt and restarted.")
     return 0

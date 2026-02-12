@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict
 
 import requests
 
@@ -12,87 +10,11 @@ from config import (
     MODRINTH_BASE_URL,
     MODRINTH_USER_AGENT,
 )
-from db import (
-    init_db,
-    save_modpacks,
-    fetch_modpacks,
-    count_modpacks,
-    get_last_refresh,
-    fetch_modpack_by_id,
-)
-from modrinth_client import (
-    get_top_modpacks,
-    get_modpack_detail,
-    get_modpack_versions,
-)
+from modrinth_client import get_modpack_versions
 
 
 BASE_URL = MODRINTH_BASE_URL
 USER_AGENT = MODRINTH_USER_AGENT
-
-
-def refresh_modpack_cache(limit: int) -> Tuple[List[Dict], str]:
-    """
-    Fetch top modpacks from Modrinth and persist them into the local database.
-    Returns (items, refreshed_at_iso).
-    """
-    items = get_top_modpacks(base_url=BASE_URL, user_agent=USER_AGENT, limit=limit)
-    enriched_items: List[Dict] = []
-
-    for item in items:
-        project_id = item.get("project_id") or item.get("slug")
-        if not project_id:
-            continue
-        try:
-            detail = get_modpack_detail(
-                base_url=BASE_URL, user_agent=USER_AGENT, project_id=project_id
-            )
-            project_server_side = (detail.get("server_side") or "").lower()
-            versions = get_modpack_versions(
-                base_url=BASE_URL, user_agent=USER_AGENT, project_id=project_id
-            )
-            server_versions: List[Dict] = []
-            for ver in versions or []:
-                ver_server_side = (ver.get("server_side") or "").lower()
-                files = ver.get("files", []) or []
-                server_files = [
-                    {
-                        "filename": f.get("filename"),
-                        "url": f.get("url"),
-                    }
-                    for f in files
-                    if (f.get("env", {}).get("server") or "").lower() != "unsupported"
-                    and ("server" in (f.get("filename", "").lower()) or f.get("primary"))
-                ]
-                server_supported = (
-                    project_server_side != "unsupported"
-                    and ver_server_side != "unsupported"
-                    and len(server_files) > 0
-                )
-                server_versions.append(
-                    {
-                        "id": ver.get("id") or ver.get("version_id"),
-                        "version_number": ver.get("version_number"),
-                        "game_versions": ver.get("game_versions") or [],
-                        "loaders": ver.get("loaders") or [],
-                        "date_published": ver.get("date_published")
-                        or ver.get("date_created"),
-                        "server_supported": server_supported,
-                        "files": server_files,
-                        "server_side": ver_server_side,
-                    }
-                )
-            item["server_versions"] = server_versions
-            item["server_side"] = project_server_side
-        except Exception:
-            # If enrichment fails, fall back to original item
-            item["server_versions"] = []
-        enriched_items.append(item)
-
-    items = enriched_items
-    refreshed_at = datetime.now(timezone.utc).isoformat()
-    save_modpacks(items, refreshed_at)
-    return items, refreshed_at
 
 
 def _choose_best_file(files: list[dict]) -> Optional[dict]:
@@ -149,23 +71,6 @@ def resolve_server_file_url(
         return _resolve_curseforge_server_file_url(project_id, version_id)
     if project_id.isdigit() and source_key != "modrinth":
         return _resolve_curseforge_server_file_url(project_id, version_id)
-
-    cached = fetch_modpack_by_id(project_id)
-    if cached and isinstance(cached.get("server_versions"), list):
-        ver_match = next(
-            (
-                ver
-                for ver in cached["server_versions"]
-                if ver.get("id") == version_id
-                or ver.get("version_number") == version_id
-                or ver.get("date_published") == version_id
-            ),
-            None,
-        )
-        if ver_match:
-            best = _choose_best_file(ver_match.get("files") or [])
-            if best and best.get("url"):
-                return best["url"]
 
     versions = get_modpack_versions(
         base_url=BASE_URL, user_agent=USER_AGENT, project_id=project_id

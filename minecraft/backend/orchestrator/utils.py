@@ -1,7 +1,82 @@
 import json
 import re
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
+
+
+def _install_via_install_sh(root: Path, run_dir: Path) -> Optional[str]:
+    """Strategy: Run Install.sh when present in run_dir."""
+    install_sh = run_dir / "Install.sh"
+    if install_sh.exists() and install_sh.is_file():
+        rel = install_sh.relative_to(root)
+        return f"chmod +x {rel.as_posix()} && ./{rel.as_posix()} && "
+    return None
+
+
+def _install_via_neoforge_installer(root: Path, run_dir: Path) -> Optional[str]:
+    """Strategy: Run neoforge-*-installer.jar --installServer when neoforge server jar doesn't exist."""
+    for inst in root.rglob("neoforge-*-installer.jar"):
+        if "libraries" in inst.parts or "mods" in inst.parts:
+            continue
+        name = inst.name
+        if "neoforge-" in name and "-installer" in name:
+            version = name.split("neoforge-", 1)[1].rsplit("-installer", 1)[0]
+            neoforge_jar = inst.parent / f"neoforge-{version}.jar"
+            unix_args = root / "libraries" / "net" / "neoforged" / "neoforge" / version / "unix_args.txt"
+            if not neoforge_jar.exists() and not unix_args.exists():
+                rel = inst.relative_to(root)
+                rel_dir = rel.parent.as_posix()
+                cd = f"cd {rel_dir} && " if rel_dir != "." else ""
+                return f"{cd}java -jar {rel.name} --installServer && "
+    return None
+
+
+def _install_via_forge_installer(root: Path, run_dir: Path) -> Optional[str]:
+    """Strategy: Run forge-*-installer.jar --installServer when forge server jar doesn't exist."""
+    for inst in root.rglob("forge-*-installer.jar"):
+        if "libraries" in inst.parts or "mods" in inst.parts:
+            continue
+        name = inst.name
+        if "forge-" in name and "-installer" in name:
+            forge_version = name.split("forge-", 1)[1].rsplit("-installer", 1)[0]
+            forge_jar = inst.parent / f"forge-{forge_version}.jar"
+            forge_universal = inst.parent / f"forge-{forge_version}-universal.jar"
+            unix_args = root / "libraries" / "net" / "minecraftforge" / "forge" / forge_version / "unix_args.txt"
+            if not forge_jar.exists() and not forge_universal.exists() and not unix_args.exists():
+                rel = inst.relative_to(root)
+                rel_dir = rel.parent.as_posix()
+                cd = f"cd {rel_dir} && " if rel_dir != "." else ""
+                return f"{cd}java -jar {rel.name} --installServer && "
+    return None
+
+
+# Extensible: add new strategies here. First non-None wins. NeoForge before Forge when both exist.
+INSTALL_STRATEGIES: List[Callable[[Path, Path], Optional[str]]] = [
+    _install_via_install_sh,
+    _install_via_neoforge_installer,
+    _install_via_forge_installer,
+]
+
+
+def _find_unix_args_path(root: Path) -> Optional[str]:
+    """Return relative path to unix_args.txt if it exists, else None."""
+    found = next((p for p in root.rglob("unix_args.txt")), None)
+    if found:
+        return found.relative_to(root).as_posix()
+    return None
+
+
+def get_install_command(root: Path, run_dir: Optional[Path] = None) -> Optional[str]:
+    """
+    Returns a bash fragment to run before the main command, or None.
+    Uses INSTALL_STRATEGIES - add new patterns there to extend support.
+    """
+    run_dir = run_dir or root
+    for strategy in INSTALL_STRATEGIES:
+        result = strategy(root, run_dir)
+        if result:
+            return result
+    return None
 
 def extract_minecraft_versions(text: str) -> List[str]:
     return re.findall(r"\b1\.\d+(?:\.\d+)?\b", text)
@@ -152,10 +227,12 @@ def detect_generic_start_command(root: Path, ram_mb: int, instance_id: Optional[
     if script and script.suffix.lower() == ".sh":
         rel = script.relative_to(root)
         rel_posix = rel.as_posix()
-        command = [
-            "/bin/bash", "-c",
-            f"cd /data && chmod +x {rel_posix} && ./{rel_posix}"
-        ]
+        install_prefix = get_install_command(root, script.parent)
+        if install_prefix:
+            cmd_str = f"cd /data && chmod +x {rel_posix} && {install_prefix}./{rel_posix}"
+        else:
+            cmd_str = f"cd /data && chmod +x {rel_posix} && ./{rel_posix}"
+        command = ["/bin/bash", "-c", cmd_str]
         return command, rel.as_posix()
 
     # 5. Generic Jar Fallback
@@ -176,10 +253,12 @@ def detect_generic_start_command(root: Path, ram_mb: int, instance_id: Optional[
         jar = jar_sorted[0]
         rel = jar.relative_to(root)
         rel_dir = rel.parent.as_posix()
-        rel_dir = rel.parent.as_posix()
         cd_prefix = f"cd {rel_dir} && " if rel_dir and rel_dir != "." else ""
         jvm_opts = f"-Xms{ram_mb}M -Xmx{ram_mb}M"
-        command = ["/bin/bash", "-c", f"{cd_prefix}java {jvm_opts} -jar {rel.name} nogui"]
+        install_prefix = get_install_command(root, jar.parent)
+        run_cmd = f"{cd_prefix}java {jvm_opts} -jar {rel.name} nogui"
+        cmd_str = f"{install_prefix}{run_cmd}" if install_prefix else run_cmd
+        command = ["/bin/bash", "-c", cmd_str]
         return command, rel.as_posix()
 
     return [], None

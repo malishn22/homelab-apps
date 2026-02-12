@@ -22,7 +22,7 @@ function mapInstanceToServer(instance: Record<string, unknown>): Server {
         port: (instance.port as number) ?? 25565,
         status: (instance.status as Server['status']) || 'OFFLINE',
         players: 0,
-        maxPlayers: 20,
+        maxPlayers: 5,
         ramUsage: 0,
         ramLimit: typeof instance.ram_mb === 'number' ? Math.round((instance.ram_mb as number) / 1024 * 100) / 100 : 4,
     };
@@ -30,7 +30,7 @@ function mapInstanceToServer(instance: Record<string, unknown>): Server {
 
 export function useServers() {
     const [servers, setServers] = useState<Server[]>([]);
-    const [activeServerId, setActiveServerId] = useState<string | null>(null);
+    const [detailServerId, setDetailServerId] = useState<string | null>(null);
     const [isInitialLoading, setIsInitialLoading] = useState(true);
 
     const bootstrap = useCallback(async () => {
@@ -51,12 +51,9 @@ export function useServers() {
         bootstrap();
     }, [bootstrap]);
 
-    const handleServerSelect = useCallback(
-        (serverId: string) => {
-            setActiveServerId(serverId);
-        },
-        []
-    );
+    const handleServerSelect = useCallback((serverId: string) => {
+        setDetailServerId(serverId);
+    }, []);
 
     const uniqueServerName = useCallback(
         (baseName: string): string => {
@@ -89,8 +86,8 @@ export function useServers() {
     return {
         servers,
         setServers,
-        activeServerId,
-        setActiveServerId,
+        detailServerId,
+        setDetailServerId,
         isInitialLoading,
         bootstrap,
         handleServerSelect,
@@ -105,7 +102,7 @@ export function useServers() {
 }
 
 export function useServerLogsAndStats(
-    activeServerId: string | null,
+    detailServerId: string | null,
     servers: Server[],
     setServers: React.Dispatch<React.SetStateAction<Server[]>>
 ) {
@@ -113,8 +110,10 @@ export function useServerLogsAndStats(
     const [serverStats, setServerStats] = useState<Record<string, ServerStats>>({});
     const logIntervalsRef = useRef<Record<string, number>>({});
     const statIntervalsRef = useRef<Record<string, number>>({});
+    const globalStatIntervalRef = useRef<number | null>(null);
     const lastLogTailRef = useRef<Record<string, string | undefined>>({});
     const lastStatusRef = useRef<Record<string, Server['status'] | undefined>>({});
+    const initialFetchIdsRef = useRef<Set<string>>(new Set());
 
     const clearServerTimers = useCallback((serverId: string) => {
         if (logIntervalsRef.current[serverId]) {
@@ -139,6 +138,8 @@ export function useServerLogsAndStats(
                     tps: null,
                     tickTimeMs: null,
                     status: server.status as ServerStats['status'],
+                    players: server.players,
+                    maxPlayers: server.maxPlayers,
                 },
             };
         });
@@ -176,6 +177,8 @@ export function useServerLogsAndStats(
                                 status,
                                 ramUsage: typeof stats.ramUsage === 'number' ? stats.ramUsage : srv.ramUsage,
                                 ramLimit: srv.ramLimit,
+                                players: typeof stats.players === 'number' ? stats.players : srv.players,
+                                maxPlayers: typeof stats.maxPlayers === 'number' ? stats.maxPlayers : srv.maxPlayers,
                             }
                             : srv
                     )
@@ -193,6 +196,9 @@ export function useServerLogsAndStats(
                                 ? stats.tickTimeMs
                                 : prev[serverId]?.tickTimeMs ?? null,
                         status: status as ServerStats['status'],
+                        players: typeof stats.players === 'number' ? stats.players : prev[serverId]?.players ?? 0,
+                        maxPlayers: typeof stats.maxPlayers === 'number' ? stats.maxPlayers : prev[serverId]?.maxPlayers ?? 5,
+                        hasReceivedStatus: true,
                     },
                 }));
 
@@ -232,6 +238,9 @@ export function useServerLogsAndStats(
                         tps: prev[serverId]?.tps ?? null,
                         tickTimeMs: prev[serverId]?.tickTimeMs ?? null,
                         status: 'OFFLINE',
+                        players: 0,
+                        maxPlayers: prev[serverId]?.maxPlayers ?? 5,
+                        hasReceivedStatus: true,
                     },
                 }));
                 lastStatusRef.current[serverId] = 'OFFLINE';
@@ -294,14 +303,6 @@ export function useServerLogsAndStats(
                 appendLog(serverId, 'Start request sent. Polling status…', LogLevel.INFO);
                 fetchAndUpdateStatus(serverId);
                 fetchAndUpdateLogs(serverId);
-                statIntervalsRef.current[serverId] = window.setInterval(
-                    () => fetchAndUpdateStatus(serverId),
-                    5000
-                );
-                logIntervalsRef.current[serverId] = window.setInterval(
-                    () => fetchAndUpdateLogs(serverId),
-                    4000
-                );
             } catch (err: unknown) {
                 const message = err instanceof Error ? err.message : String(err);
                 appendLog(serverId, `Failed to start: ${message}`, LogLevel.ERROR);
@@ -372,14 +373,6 @@ export function useServerLogsAndStats(
                 appendLog(serverId, 'Restart request sent. Polling status…', LogLevel.INFO);
                 fetchAndUpdateStatus(serverId);
                 fetchAndUpdateLogs(serverId);
-                statIntervalsRef.current[serverId] = window.setInterval(
-                    () => fetchAndUpdateStatus(serverId),
-                    5000
-                );
-                logIntervalsRef.current[serverId] = window.setInterval(
-                    () => fetchAndUpdateLogs(serverId),
-                    4000
-                );
             } catch (err: unknown) {
                 const message = err instanceof Error ? err.message : String(err);
                 appendLog(serverId, `Failed to restart: ${message}`, LogLevel.ERROR);
@@ -416,31 +409,63 @@ export function useServerLogsAndStats(
         return () => {
             Object.values(logIntervalsRef.current).forEach((id) => clearInterval(id));
             Object.values(statIntervalsRef.current).forEach((id) => clearInterval(id));
+            if (globalStatIntervalRef.current != null) {
+                clearInterval(globalStatIntervalRef.current);
+                globalStatIntervalRef.current = null;
+            }
         };
     }, []);
 
     useEffect(() => {
-        Object.values(logIntervalsRef.current).forEach((id) => clearInterval(id));
-        Object.values(statIntervalsRef.current).forEach((id) => clearInterval(id));
-        logIntervalsRef.current = {};
-        statIntervalsRef.current = {};
+        if (servers.length === 0) {
+            initialFetchIdsRef.current.clear();
+            return;
+        }
+        const notYetFetched = servers.filter((s) => !initialFetchIdsRef.current.has(s.id));
+        notYetFetched.forEach((s) => {
+            initialFetchIdsRef.current.add(s.id);
+            fetchAndUpdateStatus(s.id);
+        });
+    }, [servers, fetchAndUpdateStatus]);
 
-        if (!activeServerId) return;
-        const active = servers.find((s) => s.id === activeServerId);
-        if (!active) return;
-        if (active.status === 'ONLINE' || active.status === 'STARTING' || active.status === 'PREPARING') {
-            fetchAndUpdateStatus(active.id);
-            fetchAndUpdateLogs(active.id);
-            statIntervalsRef.current[active.id] = window.setInterval(
-                () => fetchAndUpdateStatus(active.id),
-                6000
-            );
-            logIntervalsRef.current[active.id] = window.setInterval(
-                () => fetchAndUpdateLogs(active.id),
+    useEffect(() => {
+        if (globalStatIntervalRef.current != null) {
+            clearInterval(globalStatIntervalRef.current);
+            globalStatIntervalRef.current = null;
+        }
+        const toPoll = servers.filter(
+            (s) => s.status === 'ONLINE' || s.status === 'STARTING' || s.status === 'PREPARING'
+        );
+        if (toPoll.length === 0) return;
+        const pollAll = () => toPoll.forEach((s) => fetchAndUpdateStatus(s.id));
+        pollAll();
+        globalStatIntervalRef.current = window.setInterval(pollAll, 5000);
+        return () => {
+            if (globalStatIntervalRef.current != null) {
+                clearInterval(globalStatIntervalRef.current);
+                globalStatIntervalRef.current = null;
+            }
+        };
+    }, [servers, fetchAndUpdateStatus]);
+
+    useEffect(() => {
+        Object.values(logIntervalsRef.current).forEach((id) => clearInterval(id));
+        logIntervalsRef.current = {};
+        if (!detailServerId) return;
+        const detail = servers.find((s) => s.id === detailServerId);
+        if (!detail) return;
+        if (detail.status === 'ONLINE' || detail.status === 'STARTING' || detail.status === 'PREPARING') {
+            fetchAndUpdateLogs(detail.id);
+            logIntervalsRef.current[detail.id] = window.setInterval(
+                () => fetchAndUpdateLogs(detail.id),
                 5000
             );
         }
-    }, [activeServerId, servers, fetchAndUpdateStatus, fetchAndUpdateLogs]);
+        return () => {
+            Object.values(logIntervalsRef.current).forEach((id) => clearInterval(id));
+            logIntervalsRef.current = {};
+        };
+    }, [detailServerId, servers, fetchAndUpdateLogs]);
 
     const clearServerData = useCallback((serverId: string) => {
         clearServerTimers(serverId);

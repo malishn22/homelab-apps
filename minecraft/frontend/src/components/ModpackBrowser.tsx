@@ -112,15 +112,10 @@ interface ModpackBrowserProps {
 }
 
 type SortMode = 'downloads' | 'updated' | 'relevance' | 'follows';
-type SourceFilterOption = {
-    key: ModpackSource;
-    label: string;
-    dotClass: string;
-};
 
-const SOURCE_FILTERS: SourceFilterOption[] = [
-    { key: 'modrinth', label: 'Modrinth', dotClass: 'bg-violet-400' },
-    { key: 'curseforge', label: 'CurseForge', dotClass: 'bg-amber-400' },
+const PROVIDER_OPTIONS: { key: ModpackSource; label: string }[] = [
+    { key: 'curseforge', label: 'CurseForge' },
+    { key: 'modrinth', label: 'Modrinth' },
 ];
 
 const SOURCE_BADGES: Record<
@@ -144,23 +139,23 @@ const SOURCE_BADGES: Record<
 const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifications: _onAddNotifications }) => {
     const [modpacks, setModpacks] = useState<Modpack[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
-    const [debouncedQuery, setDebouncedQuery] = useState('');
+    const [submittedQuery, setSubmittedQuery] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [sortMode, setSortMode] = useState<SortMode>('downloads');
     const [page, setPage] = useState(1);
-    const [pageSize, setPageSize] = useState(50);
-    const [serverFilter, setServerFilter] = useState<'all' | 'server' | 'client'>('all');
-    const [selectedSources, setSelectedSources] = useState<ModpackSource[]>(['modrinth', 'curseforge']);
+    const [pageSize, setPageSize] = useState(20);
+    const [serverFilter, setServerFilter] = useState<'all' | 'server' | 'client'>('server');
+    const [selectedProvider, setSelectedProvider] = useState<ModpackSource>('curseforge');
     const [totalHits, setTotalHits] = useState(0);
     const [reloadToken, setReloadToken] = useState(0);
     const forceRefreshRef = useRef(false);
 
-    useEffect(() => {
-        const timer = setTimeout(() => setDebouncedQuery(searchQuery.trim()), 250);
-        return () => clearTimeout(timer);
-    }, [searchQuery]);
+    const handleSearchSubmit = () => {
+        setSubmittedQuery(searchQuery.trim());
+        setPage(1);
+    };
 
     useEffect(() => {
         let isMounted = true;
@@ -171,11 +166,11 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
             try {
                 const forceRefresh = forceRefreshRef.current;
                 const resp = await searchModpacks({
-                    query: debouncedQuery,
+                    query: submittedQuery,
                     page: Math.max(0, page - 1),
                     limit: pageSize,
                     sort: sortMode,
-                    sources: selectedSources,
+                    sources: [selectedProvider],
                     force: forceRefresh,
                 });
                 if (!isMounted) return;
@@ -204,7 +199,7 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
         return () => {
             isMounted = false;
         };
-    }, [debouncedQuery, page, pageSize, sortMode, reloadToken, selectedSources]);
+    }, [submittedQuery, page, pageSize, sortMode, reloadToken, selectedProvider]);
 
     const handleRefreshClick = () => {
         forceRefreshRef.current = true;
@@ -214,15 +209,10 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
 
     useEffect(() => {
         setPage(1);
-    }, [debouncedQuery, sortMode, pageSize, serverFilter, selectedSources]);
+    }, [submittedQuery, sortMode, pageSize, serverFilter, selectedProvider]);
 
     const filteredPacks = useMemo(() => {
-        const activeSources = new Set(selectedSources);
-        const filtered = modpacks.filter((pack) => {
-            const packSource = (pack.source || 'modrinth') as ModpackSource;
-            if (activeSources.size > 0 && !activeSources.has(packSource)) {
-                return false;
-            }
+        return modpacks.filter((pack) => {
             const serverSide = (pack.serverSide || '').toLowerCase() || 'unsupported';
             if (serverFilter === 'server') {
                 return serverSide !== 'unsupported';
@@ -232,18 +222,7 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
             }
             return true;
         });
-        return filtered;
-    }, [modpacks, serverFilter, selectedSources]);
-
-    const toggleSource = (source: ModpackSource) => {
-        setSelectedSources((prev) => {
-            const isActive = prev.includes(source);
-            if (isActive) {
-                return prev.length > 1 ? prev.filter((item) => item !== source) : prev;
-            }
-            return [...prev, source];
-        });
-    };
+    }, [modpacks, serverFilter]);
 
     const totalPages = useMemo(() => {
         const total = totalHits || filteredPacks.length;
@@ -295,7 +274,7 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
                             <div className="flex flex-col items-center justify-center py-20 px-6 rounded-2xl glass-panel border border-border-main/50">
                                 <Loader2 className="w-12 h-12 text-primary animate-spin mb-4" strokeWidth={2} />
                                 <p className="text-lg font-medium text-white mb-1">Loading modpacks</p>
-                                <p className="text-sm text-text-muted text-center max-w-sm">Fetching from Modrinth and CurseForge. First load may take a few seconds.</p>
+                                <p className="text-sm text-text-muted text-center max-w-sm">Fetching from {SOURCE_BADGES[selectedProvider]?.label || selectedProvider}. First load may take a few seconds.</p>
                             </div>
                         )}
 
@@ -473,13 +452,29 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
 
                     <aside className="w-full lg:w-80 xl:w-96 flex-shrink-0 order-first lg:order-last">
                         <div className="glass-panel p-4 rounded-2xl space-y-3">
+                            <div className="space-y-3">
+                                <div className="text-xs uppercase tracking-wide text-text-dim">Provider</div>
+                                <select
+                                    value={selectedProvider}
+                                    onChange={(e) => {
+                                        setSelectedProvider(e.target.value as ModpackSource);
+                                        setPage(1);
+                                    }}
+                                    className="w-full bg-bg-surface/60 border border-border-main rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                                >
+                                    {PROVIDER_OPTIONS.map((opt) => (
+                                        <option key={opt.key} value={opt.key}>{opt.label}</option>
+                                    ))}
+                                </select>
+                            </div>
                             <div className="relative">
                                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-primary" size={20} />
-                                <input 
-                                    type="text" 
-                                    placeholder="Search modpacks..." 
+                                <input
+                                    type="text"
+                                    placeholder="Search modpacks (press Enter)"
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleSearchSubmit()}
                                     className="w-full bg-bg-surface/50 border border-border-main rounded-xl py-3 pl-12 pr-4 text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all placeholder:text-text-dim"
                                 />
                             </div>
@@ -509,32 +504,6 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
                             </div>
 
                             <div className="space-y-3">
-                                <div className="text-xs uppercase tracking-wide text-text-dim">Sources</div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    {SOURCE_FILTERS.map((opt) => {
-                                        const isActive = selectedSources.includes(opt.key);
-                                        return (
-                                            <button
-                                                key={opt.key}
-                                                onClick={() => toggleSource(opt.key)}
-                                                aria-pressed={isActive}
-                                                className={`w-full text-left px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
-                                                    isActive
-                                                        ? 'border-primary/60 bg-primary/15 text-primary shadow-[0_0_0_1px_rgba(129,140,248,0.25)]'
-                                                        : 'border-border-main bg-bg-surface/60 text-text-muted hover:border-primary/30 hover:text-white'
-                                                }`}
-                                            >
-                                                <span className="inline-flex items-center gap-2">
-                                                    <span className={`h-2 w-2 rounded-full ${opt.dotClass}`} />
-                                                    {opt.label}
-                                                </span>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-
-                            <div className="space-y-3">
                                 <div className="text-xs uppercase tracking-wide text-text-dim">Filters</div>
                                 <div className="flex flex-wrap gap-2">
                                     <select
@@ -546,7 +515,7 @@ const ModpackBrowser: React.FC<ModpackBrowserProps> = ({ onSelect, onAddNotifica
                                         className="bg-bg-surface/60 border border-border-main rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                                     >
                                         <option value="all">All</option>
-                                        <option value="server">Server</option>
+                                        <option value="server">Server Exist</option>
                                         <option value="client">Client only</option>
                                     </select>
                                     <div className="flex items-center gap-2">

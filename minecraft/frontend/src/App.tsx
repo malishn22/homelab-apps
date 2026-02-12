@@ -40,8 +40,8 @@ const App: React.FC = () => {
     const {
         servers,
         setServers,
-        activeServerId,
-        setActiveServerId,
+        detailServerId,
+        setDetailServerId,
         isInitialLoading,
         mapInstanceToServer,
         uniqueServerName,
@@ -61,10 +61,10 @@ const App: React.FC = () => {
         sendCommand,
         setServerStats,
         clearServerData,
-    } = useServerLogsAndStats(activeServerId, servers, setServers);
+    } = useServerLogsAndStats(detailServerId, servers, setServers);
 
     const handleServerSelect = (serverId: string, tab?: 'console' | 'files') => {
-        setActiveServerId(serverId);
+        setDetailServerId(serverId);
         setCurrentView(View.SERVERS);
         setServersViewMode('detail');
         setDetailTab(tab ?? 'console');
@@ -73,7 +73,7 @@ const App: React.FC = () => {
     };
 
     const handleFilesServerChange = (serverId: string) => {
-        setActiveServerId(serverId || null);
+        setDetailServerId(serverId || null);
         setFilesBrowserPath('');
         setFilesSelectedPath(null);
     };
@@ -83,10 +83,11 @@ const App: React.FC = () => {
     }, [servers, ensureServerStats]);
 
     useEffect(() => {
-        if (serversViewMode === 'detail' && activeServerId && !servers.some((s) => s.id === activeServerId)) {
+        if (serversViewMode === 'detail' && detailServerId && !servers.some((s) => s.id === detailServerId)) {
             setServersViewMode('list');
+            setDetailServerId(null);
         }
-    }, [serversViewMode, activeServerId, servers]);
+    }, [serversViewMode, detailServerId, servers]);
 
 
     useEffect(() => {
@@ -141,9 +142,10 @@ const App: React.FC = () => {
             setServers((prev) => [...prev, serverWithPreparing]);
             ensureServerStats(serverWithPreparing);
             addNotifications([`Created server "${serverWithPreparing.name}" for ${modpack.title}.`]);
-            setActiveServerId(serverWithPreparing.id);
+            setDetailServerId(serverWithPreparing.id);
             setCurrentView(View.SERVERS);
             setServersViewMode('detail');
+            setDetailTab('console');
             appendLog(serverWithPreparing.id, 'Server created. Preparing (downloading mods)...', LogLevel.INFO);
         } catch (err: unknown) {
             addNotifications([`Failed to create server: ${err instanceof Error ? err.message : err}`]);
@@ -176,9 +178,8 @@ const App: React.FC = () => {
         const server = servers.find((s) => s.id === serverId);
         clearServerData(serverId);
         setServers((prev) => prev.filter((s) => s.id !== serverId));
-        if (activeServerId === serverId) {
-            const remaining = servers.filter((s) => s.id !== serverId);
-            setActiveServerId(remaining.length > 0 ? remaining[0].id : null);
+        if (detailServerId === serverId) {
+            setDetailServerId(null);
             setServersViewMode('list');
         }
         addNotifications([`Deleted server "${server?.name ?? serverId}".`]);
@@ -195,7 +196,6 @@ const App: React.FC = () => {
                     return (
                         <ServerList
                             servers={servers}
-                            activeServerId={activeServerId}
                             statsById={serverStats}
                             onSelectServer={handleServerSelect}
                             onCreateServer={() => {
@@ -209,13 +209,16 @@ const App: React.FC = () => {
                         />
                     );
                 }
-                const activeServer = servers.find((s) => s.id === activeServerId) ?? null;
-                if (!activeServer) {
+                const detailServer = servers.find((s) => s.id === detailServerId) ?? null;
+                if (!detailServer) {
                     return (
                         <div className="flex flex-col items-center justify-center h-full text-text-muted gap-4">
                             <p className="text-sm">Server not found.</p>
                             <button
-                                onClick={() => setServersViewMode('list')}
+                                onClick={() => {
+                                    setDetailServerId(null);
+                                    setServersViewMode('list');
+                                }}
                                 className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-white transition-colors"
                             >
                                 Back to servers
@@ -227,7 +230,10 @@ const App: React.FC = () => {
                     <div className="flex flex-col h-full">
                         <div className="flex items-center gap-4 mb-2">
                             <button
-                                onClick={() => setServersViewMode('list')}
+                                onClick={() => {
+                                    setDetailServerId(null);
+                                    setServersViewMode('list');
+                                }}
                                 className="flex items-center gap-2 px-3 py-2 rounded-lg text-text-muted hover:text-white hover:bg-white/5 transition-colors text-sm"
                             >
                                 <ChevronLeft size={18} />
@@ -260,7 +266,7 @@ const App: React.FC = () => {
                             {detailTab === 'files' && servers.length > 1 && (
                                 <select
                                     className="px-3 py-2 rounded-lg bg-bg-surface border border-white/5 text-white text-sm focus:outline-none focus:border-primary"
-                                    value={activeServerId ?? ''}
+                                    value={detailServerId ?? ''}
                                     onChange={(e) => handleFilesServerChange(e.target.value)}
                                 >
                                     {servers.map((s) => (
@@ -273,19 +279,19 @@ const App: React.FC = () => {
                         </div>
                         {detailTab === 'console' ? (
                             <ServerConsole
-                                server={activeServer}
-                                logs={serverLogs[activeServer.id] ?? []}
-                                stats={serverStats[activeServer.id]}
-                                onStart={() => startServer(activeServer.id)}
-                                onStop={() => stopServer(activeServer.id)}
-                                onRestart={() => restartServer(activeServer.id)}
-                                onSendCommand={(cmd) => sendCommand(activeServer.id, cmd)}
+                                server={detailServer}
+                                logs={serverLogs[detailServer.id] ?? []}
+                                stats={serverStats[detailServer.id]}
+                                onStart={() => startServer(detailServer.id)}
+                                onStop={() => stopServer(detailServer.id)}
+                                onRestart={() => restartServer(detailServer.id)}
+                                onSendCommand={(cmd) => sendCommand(detailServer.id, cmd)}
                             />
                         ) : (
                             <div className="flex flex-1 min-h-0 gap-4">
                                 <div className="w-64 shrink-0 rounded-xl border border-white/5 bg-bg-surface/50 overflow-hidden">
                                     <ServerFileBrowser
-                                        instanceId={activeServerId}
+                                        instanceId={detailServerId}
                                         currentPath={filesBrowserPath}
                                         onPathChange={setFilesBrowserPath}
                                         onSelectFile={setFilesSelectedPath}
@@ -301,7 +307,7 @@ const App: React.FC = () => {
                                 </div>
                                 <div className="flex-1 min-w-0 rounded-xl border border-white/5 bg-bg-surface/50 overflow-hidden">
                                     <ServerFileEditor
-                                        instanceId={activeServerId}
+                                        instanceId={detailServerId}
                                         filePath={filesSelectedPath}
                                     />
                                 </div>
@@ -310,22 +316,12 @@ const App: React.FC = () => {
                     </div>
                 );
             case View.MODPACKS:
-                return selectedModpack ? (
-                    <ModpackDetail
-                        modpack={selectedModpack}
-                        loading={isLoadingDetail}
-                        error={detailError}
-                        servers={servers}
-                        onBack={() => {
-                            setSelectedModpack(null);
-                            setDetailError(null);
-                        }}
-                        onInstall={handleInstallRequest}
-                    />
-                ) : (
-                    <ModpackBrowser
-                        onAddNotifications={addNotifications}
-                        onSelect={async (modpack) => {
+                return (
+                    <div className="relative h-full min-h-0">
+                        <div className={`h-full ${selectedModpack ? 'hidden' : ''}`}>
+                            <ModpackBrowser
+                                onAddNotifications={addNotifications}
+                                onSelect={async (modpack) => {
                             setSelectedModpack(modpack);
                             setDetailError(null);
                             setIsLoadingDetail(true);
@@ -382,7 +378,24 @@ const App: React.FC = () => {
                                 setIsLoadingDetail(false);
                             }
                         }}
-                    />
+                            />
+                        </div>
+                        {selectedModpack && (
+                            <div className="absolute inset-0 z-10 overflow-auto">
+                                <ModpackDetail
+                                    modpack={selectedModpack}
+                                loading={isLoadingDetail}
+                                error={detailError}
+                                servers={servers}
+                                onBack={() => {
+                                    setSelectedModpack(null);
+                                    setDetailError(null);
+                                }}
+                                onInstall={handleInstallRequest}
+                                />
+                            </div>
+                        )}
+                    </div>
                 );
             case View.SETTINGS:
                 return (

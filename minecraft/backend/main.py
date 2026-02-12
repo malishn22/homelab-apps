@@ -12,7 +12,6 @@ from config import (
     validate_curseforge_settings,
     validate_modrinth_settings,
 )
-from db import init_db
 from api.modpacks import router as modpacks_router
 from api.servers import router as servers_router
 from api.files import router as files_router
@@ -35,7 +34,6 @@ def on_startup() -> None:
     """
     Validate config on process start.
     """
-    init_db()
     validate_modrinth_settings()
     require_curseforge = bool(CURSEFORGE_API_KEY or CURSEFORGE_BASE_URL)
     validate_curseforge_settings(required=require_curseforge)
