@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .state import OrchestratorError, _log_line
 from .providers.factory import get_provider
+from .server_defaults import apply_server_defaults, apply_whitelist_defaults, apply_ops_defaults
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +41,10 @@ def prepare_instance_files(
         instance_dir,
         extract_dir
     )
-    
+    apply_server_defaults(server_root, instance_id)
+    apply_whitelist_defaults(server_root, instance_id)
+    apply_ops_defaults(server_root, instance_id)
+
     # Provider detects start command
     try:
         command, entry_target = provider.generate_start_command(

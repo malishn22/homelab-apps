@@ -9,10 +9,11 @@ interface ServerConsoleProps {
     stats?: ServerStats;
     onStart?: () => void;
     onStop?: () => void;
+    onRestart?: () => void;
     onSendCommand?: (command: string) => void;
 }
 
-const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats, onStart, onStop, onSendCommand }) => {
+const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats, onStart, onStop, onRestart, onSendCommand }) => {
     const consoleEndRef = useRef<HTMLDivElement>(null);
     const [command, setCommand] = useState('');
     const effectiveStats: ServerStats = stats || {
@@ -160,7 +161,7 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
 
     return (
         <div className="flex flex-col h-full p-2">
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex justify-between items-center mb-3">
                 <div>
                     <h2 className="text-2xl font-bold text-white flex items-center gap-2">
                          <Terminal className="text-accent" size={24} /> 
@@ -172,7 +173,7 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
                 </div>
                 <div className="flex gap-2">
                     <button
-                        onClick={() => onStart?.()}
+                        onClick={() => (isOnline ? onRestart?.() : onStart?.())}
                         disabled={!server || isStarting || isPreparing}
                         className="flex items-center gap-2 px-4 py-2 bg-bg-surface hover:bg-bg-hover text-white rounded-lg border border-border-main transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
                     >
@@ -189,7 +190,7 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
             </div>
 
             {/* Stats Row */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
                 {/* RAM Card */}
                 <div className="glass-panel p-5 rounded-2xl relative overflow-hidden group">
                     <div className="absolute -right-4 -top-4 w-24 h-24 bg-primary/20 rounded-full blur-2xl group-hover:bg-primary/30 transition-all"></div>
@@ -298,7 +299,7 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
             </div>
 
             {/* Input Line */}
-            <form className="mt-4 relative" onSubmit={handleSubmit}>
+            <form className="mt-3 relative" onSubmit={handleSubmit}>
                 <ChevronRight className="absolute left-4 top-1/2 -translate-y-1/2 text-accent" size={18} />
                 <input 
                     type="text" 

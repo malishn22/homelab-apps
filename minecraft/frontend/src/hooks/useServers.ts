@@ -6,6 +6,7 @@ import {
     createServer as apiCreateServer,
     startServer as apiStartServer,
     stopServer as apiStopServer,
+    restartServer as apiRestartServer,
     fetchLogs as apiFetchLogs,
     fetchStatus as apiFetchStatus,
     sendCommand as apiSendCommand,
@@ -23,7 +24,7 @@ function mapInstanceToServer(instance: Record<string, unknown>): Server {
         players: 0,
         maxPlayers: 20,
         ramUsage: 0,
-        ramLimit: (instance.ram_gb as number) || 4,
+        ramLimit: typeof instance.ram_mb === 'number' ? Math.round((instance.ram_mb as number) / 1024 * 100) / 100 : 4,
     };
 }
 
@@ -356,6 +357,48 @@ export function useServerLogsAndStats(
         [servers, clearServerTimers, appendLog, setServers]
     );
 
+    const restartServer = useCallback(
+        async (serverId: string) => {
+            const server = servers.find((s) => s.id === serverId);
+            if (!server) return;
+            ensureServerStats(server);
+            clearServerTimers(serverId);
+            setServers((prev) =>
+                prev.map((srv) => (srv.id === serverId ? { ...srv, status: 'STARTING' as const } : srv))
+            );
+            appendLog(serverId, 'Restart requested. Stopping, then starting…', LogLevel.INFO);
+            try {
+                await apiRestartServer(serverId);
+                appendLog(serverId, 'Restart request sent. Polling status…', LogLevel.INFO);
+                fetchAndUpdateStatus(serverId);
+                fetchAndUpdateLogs(serverId);
+                statIntervalsRef.current[serverId] = window.setInterval(
+                    () => fetchAndUpdateStatus(serverId),
+                    5000
+                );
+                logIntervalsRef.current[serverId] = window.setInterval(
+                    () => fetchAndUpdateLogs(serverId),
+                    4000
+                );
+            } catch (err: unknown) {
+                const message = err instanceof Error ? err.message : String(err);
+                appendLog(serverId, `Failed to restart: ${message}`, LogLevel.ERROR);
+                setServers((prev) =>
+                    prev.map((srv) => (srv.id === serverId ? { ...srv, status: 'OFFLINE' as const } : srv))
+                );
+            }
+        },
+        [
+            servers,
+            ensureServerStats,
+            clearServerTimers,
+            appendLog,
+            fetchAndUpdateStatus,
+            fetchAndUpdateLogs,
+            setServers,
+        ]
+    );
+
     const sendCommand = useCallback((serverId: string, command: string) => {
         const trimmed = command.trim();
         if (!trimmed) return;
@@ -422,6 +465,7 @@ export function useServerLogsAndStats(
         ensureServerStats,
         startServer,
         stopServer,
+        restartServer,
         sendCommand,
         setServerStats,
     };

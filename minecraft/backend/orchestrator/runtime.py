@@ -34,6 +34,7 @@ from .utils import (
     pick_best_version,
 )
 from .providers.factory import get_provider
+from .server_defaults import apply_server_defaults, apply_whitelist_defaults, apply_ops_defaults
 
 log = logging.getLogger(__name__)
 
@@ -355,7 +356,21 @@ def start_instance(instance_id: str) -> Dict:
         file_id_int = int(file_id) if file_id is not None else None
     except (TypeError, ValueError):
         file_id_int = None
+
+    # Preserve user edits: if server_dir exists (from a previous run), sync it back to
+    # extract_dir before overwriting, so edits made via the Files tab survive restarts.
+    if server_dir_container.exists():
+        try:
+            if extract_dir.exists():
+                shutil.rmtree(extract_dir)
+            shutil.copytree(server_dir_container, extract_dir)
+        except Exception as exc:
+            log.warning("Failed to preserve server_dir edits for %s: %s", instance_id, exc)
+
     _sync_extract_to_server(extract_dir, server_dir_container)
+    apply_server_defaults(server_dir_container, instance_id)
+    apply_whitelist_defaults(server_dir_container, instance_id)
+    apply_ops_defaults(server_dir_container, instance_id)
 
     # Auto-accept EULA right before start if it's missing
     eula_file = server_dir_container / "eula.txt"
@@ -424,7 +439,7 @@ def start_instance(instance_id: str) -> Dict:
             command=cmd,
             working_dir="/data",
             environment=env,
-            ports={"25565/tcp": port},
+            ports={f"{port}/tcp": port},
             volumes={str(server_dir_host): {"bind": "/data", "mode": "rw"}},
             stdin_open=True,
             tty=False,
@@ -455,6 +470,12 @@ def stop_instance(instance_id: str) -> Dict:
 
     _set_status(instance, STATUS_OFFLINE)
     return {"status": STATUS_OFFLINE}
+
+
+def restart_instance(instance_id: str) -> Dict:
+    """Stop the instance, then start it. Atomic restart operation."""
+    stop_instance(instance_id)
+    return start_instance(instance_id)
 
 
 def instance_status(instance_id: str) -> Dict:

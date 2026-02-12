@@ -4,9 +4,15 @@ import ModpackBrowser from './components/ModpackBrowser';
 import ModpackDetail from './components/ModpackDetail';
 import ServerConsole from './components/ServerConsole';
 import ServerList from './components/ServerList';
+import ServerFileBrowser from './components/ServerFileBrowser';
+import ServerFileEditor from './components/ServerFileEditor';
+import SettingsServerDefaults from './components/SettingsServerDefaults';
+import SettingsWhitelistDefaults from './components/SettingsWhitelistDefaults';
+import SettingsOpsDefaults from './components/SettingsOpsDefaults';
 import { LogLevel, View } from './types';
 import type { InstallRequestOptions, Modpack, Server, ServerStats } from './types';
-import { Bell, HelpCircle, Construction, Loader2 } from 'lucide-react';
+import type { DashboardTab } from './types';
+import { Bell, ChevronLeft, HelpCircle, Loader2 } from 'lucide-react';
 import { getModpackDetail } from './api/modpacks';
 import { useServers, useServerLogsAndStats } from './hooks/useServers';
 
@@ -17,13 +23,18 @@ type NotificationItem = {
 };
 
 const App: React.FC = () => {
-    const [currentView, setCurrentView] = useState<View>(View.MODPACKS);
+    const [currentView, setCurrentView] = useState<View>(View.SERVERS);
+    const [serversViewMode, setServersViewMode] = useState<'list' | 'detail'>('list');
+    const [detailTab, setDetailTab] = useState<DashboardTab>('console');
+    const [filesBrowserPath, setFilesBrowserPath] = useState('');
+    const [filesSelectedPath, setFilesSelectedPath] = useState<string | null>(null);
     const [selectedModpack, setSelectedModpack] = useState<Modpack | null>(null);
     const [isLoadingDetail, setIsLoadingDetail] = useState(false);
     const [detailError, setDetailError] = useState<string | null>(null);
     const [notifications, setNotifications] = useState<NotificationItem[]>([]);
     const [unreadCount, setUnreadCount] = useState(0);
     const [showNotifications, setShowNotifications] = useState(false);
+    const [sidebarExpanded, setSidebarExpanded] = useState(true);
     const notificationsRef = useRef<HTMLDivElement | null>(null);
 
     const {
@@ -46,21 +57,37 @@ const App: React.FC = () => {
         ensureServerStats,
         startServer,
         stopServer,
+        restartServer,
         sendCommand,
         setServerStats,
         clearServerData,
     } = useServerLogsAndStats(activeServerId, servers, setServers);
 
-    const handleServerSelect = (serverId: string) => {
+    const handleServerSelect = (serverId: string, tab?: 'console' | 'files') => {
         setActiveServerId(serverId);
-        setCurrentView(View.DASHBOARD);
+        setCurrentView(View.SERVERS);
+        setServersViewMode('detail');
+        setDetailTab(tab ?? 'console');
         const selected = servers.find((s) => s.id === serverId);
         if (selected) ensureServerStats(selected);
+    };
+
+    const handleFilesServerChange = (serverId: string) => {
+        setActiveServerId(serverId || null);
+        setFilesBrowserPath('');
+        setFilesSelectedPath(null);
     };
 
     useEffect(() => {
         servers.forEach(ensureServerStats);
     }, [servers, ensureServerStats]);
+
+    useEffect(() => {
+        if (serversViewMode === 'detail' && activeServerId && !servers.some((s) => s.id === activeServerId)) {
+            setServersViewMode('list');
+        }
+    }, [serversViewMode, activeServerId, servers]);
+
 
     useEffect(() => {
         if (!showNotifications) return;
@@ -106,7 +133,7 @@ const App: React.FC = () => {
                 loader: loaderLabel,
                 source: sourceLabel,
                 port: nextPort,
-                ram_mb: 4096,
+                ram_mb: options?.ramMB ?? 4096,
             });
 
             const mapped = mapInstanceToServer(created);
@@ -115,7 +142,8 @@ const App: React.FC = () => {
             ensureServerStats(serverWithPreparing);
             addNotifications([`Created server "${serverWithPreparing.name}" for ${modpack.title}.`]);
             setActiveServerId(serverWithPreparing.id);
-            setCurrentView(View.DASHBOARD);
+            setCurrentView(View.SERVERS);
+            setServersViewMode('detail');
             appendLog(serverWithPreparing.id, 'Server created. Preparing (downloading mods)...', LogLevel.INFO);
         } catch (err: unknown) {
             addNotifications([`Failed to create server: ${err instanceof Error ? err.message : err}`]);
@@ -148,7 +176,11 @@ const App: React.FC = () => {
         const server = servers.find((s) => s.id === serverId);
         clearServerData(serverId);
         setServers((prev) => prev.filter((s) => s.id !== serverId));
-        if (activeServerId === serverId) setActiveServerId(null);
+        if (activeServerId === serverId) {
+            const remaining = servers.filter((s) => s.id !== serverId);
+            setActiveServerId(remaining.length > 0 ? remaining[0].id : null);
+            setServersViewMode('list');
+        }
         addNotifications([`Deleted server "${server?.name ?? serverId}".`]);
         apiDeleteServer(serverId).catch((err: unknown) => {
             const msg = err instanceof Error ? err.message : String(err);
@@ -157,19 +189,125 @@ const App: React.FC = () => {
     };
 
     const renderView = () => {
-        const activeServer = servers.find((s) => s.id === activeServerId) ?? servers[0] ?? null;
-
         switch (currentView) {
-            case View.DASHBOARD:
+            case View.SERVERS:
+                if (serversViewMode === 'list') {
+                    return (
+                        <ServerList
+                            servers={servers}
+                            activeServerId={activeServerId}
+                            statsById={serverStats}
+                            onSelectServer={handleServerSelect}
+                            onCreateServer={() => {
+                                setCurrentView(View.MODPACKS);
+                                addNotifications(['Select a modpack to create a new server instance.']);
+                            }}
+                            onUpdateServer={updateServer}
+                            onStartServer={startServer}
+                            onStopServer={stopServer}
+                            onDeleteServer={deleteServerInstance}
+                        />
+                    );
+                }
+                const activeServer = servers.find((s) => s.id === activeServerId) ?? null;
+                if (!activeServer) {
+                    return (
+                        <div className="flex flex-col items-center justify-center h-full text-text-muted gap-4">
+                            <p className="text-sm">Server not found.</p>
+                            <button
+                                onClick={() => setServersViewMode('list')}
+                                className="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-white transition-colors"
+                            >
+                                Back to servers
+                            </button>
+                        </div>
+                    );
+                }
                 return (
-                    <ServerConsole
-                        server={activeServer}
-                        logs={activeServer ? serverLogs[activeServer.id] ?? [] : []}
-                        stats={activeServer ? serverStats[activeServer.id] : undefined}
-                        onStart={activeServer ? () => startServer(activeServer.id) : undefined}
-                        onStop={activeServer ? () => stopServer(activeServer.id) : undefined}
-                        onSendCommand={activeServer ? (cmd) => sendCommand(activeServer.id, cmd) : undefined}
-                    />
+                    <div className="flex flex-col h-full">
+                        <div className="flex items-center gap-4 mb-2">
+                            <button
+                                onClick={() => setServersViewMode('list')}
+                                className="flex items-center gap-2 px-3 py-2 rounded-lg text-text-muted hover:text-white hover:bg-white/5 transition-colors text-sm"
+                            >
+                                <ChevronLeft size={18} />
+                                Back to servers
+                            </button>
+                        </div>
+                        <div className="flex gap-2 mb-2">
+                            <div className="flex rounded-lg border border-white/5 overflow-hidden bg-white/5">
+                                <button
+                                    className={`px-4 py-2 text-sm font-medium transition-colors ${
+                                        detailTab === 'console'
+                                            ? 'bg-white/10 text-white'
+                                            : 'text-text-muted hover:text-white'
+                                    }`}
+                                    onClick={() => setDetailTab('console')}
+                                >
+                                    Console
+                                </button>
+                                <button
+                                    className={`px-4 py-2 text-sm font-medium transition-colors ${
+                                        detailTab === 'files'
+                                            ? 'bg-white/10 text-white'
+                                            : 'text-text-muted hover:text-white'
+                                    }`}
+                                    onClick={() => setDetailTab('files')}
+                                >
+                                    Files
+                                </button>
+                            </div>
+                            {detailTab === 'files' && servers.length > 1 && (
+                                <select
+                                    className="px-3 py-2 rounded-lg bg-bg-surface border border-white/5 text-white text-sm focus:outline-none focus:border-primary"
+                                    value={activeServerId ?? ''}
+                                    onChange={(e) => handleFilesServerChange(e.target.value)}
+                                >
+                                    {servers.map((s) => (
+                                        <option key={s.id} value={s.id}>
+                                            {s.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            )}
+                        </div>
+                        {detailTab === 'console' ? (
+                            <ServerConsole
+                                server={activeServer}
+                                logs={serverLogs[activeServer.id] ?? []}
+                                stats={serverStats[activeServer.id]}
+                                onStart={() => startServer(activeServer.id)}
+                                onStop={() => stopServer(activeServer.id)}
+                                onRestart={() => restartServer(activeServer.id)}
+                                onSendCommand={(cmd) => sendCommand(activeServer.id, cmd)}
+                            />
+                        ) : (
+                            <div className="flex flex-1 min-h-0 gap-4">
+                                <div className="w-64 shrink-0 rounded-xl border border-white/5 bg-bg-surface/50 overflow-hidden">
+                                    <ServerFileBrowser
+                                        instanceId={activeServerId}
+                                        currentPath={filesBrowserPath}
+                                        onPathChange={setFilesBrowserPath}
+                                        onSelectFile={setFilesSelectedPath}
+                                        onFileDeleted={(path) => {
+                                            if (
+                                                filesSelectedPath === path ||
+                                                (filesSelectedPath && filesSelectedPath.startsWith(path + '/'))
+                                            ) {
+                                                setFilesSelectedPath(null);
+                                            }
+                                        }}
+                                    />
+                                </div>
+                                <div className="flex-1 min-w-0 rounded-xl border border-white/5 bg-bg-surface/50 overflow-hidden">
+                                    <ServerFileEditor
+                                        instanceId={activeServerId}
+                                        filePath={filesSelectedPath}
+                                    />
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 );
             case View.MODPACKS:
                 return selectedModpack ? (
@@ -246,30 +384,12 @@ const App: React.FC = () => {
                         }}
                     />
                 );
-            case View.SERVERS:
-                return (
-                    <ServerList
-                        servers={servers}
-                        statsById={serverStats}
-                        onSelectServer={handleServerSelect}
-                        onCreateServer={() => {
-                            setCurrentView(View.MODPACKS);
-                            addNotifications(['Select a modpack to create a new server instance.']);
-                        }}
-                        onUpdateServer={updateServer}
-                        onStartServer={startServer}
-                        onStopServer={stopServer}
-                        onDeleteServer={deleteServerInstance}
-                    />
-                );
             case View.SETTINGS:
                 return (
-                    <div className="flex flex-col items-center justify-center h-full text-text-muted animate-[fadeIn_0.5s_ease-out]">
-                        <div className="w-24 h-24 rounded-full bg-bg-surface/50 flex items-center justify-center border border-white/5 mb-6 shadow-glow shadow-accent/10">
-                            <Construction size={40} className="text-accent opacity-80" />
-                        </div>
-                        <h3 className="text-xl font-bold text-white mb-2">Settings</h3>
-                        <p>Configuration panel under construction.</p>
+                    <div className="flex flex-col items-center gap-12 h-full text-text-muted animate-[fadeIn_0.5s_ease-out] pt-4 pb-12">
+                        <SettingsServerDefaults />
+                        <SettingsWhitelistDefaults />
+                        <SettingsOpsDefaults />
                     </div>
                 );
             default:
@@ -278,10 +398,18 @@ const App: React.FC = () => {
     };
 
     return (
-        <div className="flex min-h-screen w-full font-sans overflow-auto">
-            <div className="absolute inset-y-0 left-0 w-64 bg-bg-glass backdrop-blur-xl border-r border-white/5 z-10" />
-            <Sidebar currentView={currentView} onChangeView={setCurrentView} />
-            <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative z-0">
+        <div className="flex h-screen w-full font-sans overflow-hidden">
+            <Sidebar
+                currentView={currentView}
+                onChangeView={setCurrentView}
+                expanded={sidebarExpanded}
+                onToggle={() => setSidebarExpanded(!sidebarExpanded)}
+            />
+            <main
+                className={`flex-1 flex flex-col min-w-0 overflow-hidden relative z-0 transition-[margin] duration-300 ${
+                    sidebarExpanded ? 'ml-64' : 'ml-16'
+                }`}
+            >
                 <header className="h-20 flex items-center justify-between px-8 shrink-0 z-10">
                     <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
                         <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
@@ -345,7 +473,7 @@ const App: React.FC = () => {
                             <p className="text-sm text-text-muted">Fetching your servers and data…</p>
                         </div>
                     ) : (
-                        <div className="flex-1 min-h-0 overflow-auto p-6 md:p-8">{renderView()}</div>
+                        <div className="flex-1 min-h-0 overflow-auto pt-4 px-6 pb-6 md:pt-4 md:px-8 md:pb-8">{renderView()}</div>
                     )}
                 </div>
             </main>

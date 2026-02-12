@@ -1,9 +1,10 @@
 export enum View {
-  DASHBOARD = 'DASHBOARD',
   MODPACKS = 'MODPACKS',
   SERVERS = 'SERVERS',
   SETTINGS = 'SETTINGS'
 }
+
+export type DashboardTab = 'console' | 'files';
 
 export enum LogLevel {
   INFO = 'INFO',

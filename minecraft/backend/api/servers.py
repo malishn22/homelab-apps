@@ -12,6 +12,7 @@ from services.servers import (
     delete_instance,
     instance_status,
     list_server_instances,
+    restart_instance,
     send_command,
     start_instance,
     stop_instance,
@@ -135,6 +136,21 @@ def api_stop_instance(instance_id: str) -> Dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Failed to stop instance")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/{instance_id}/restart")
+def api_restart_instance(instance_id: str) -> Dict:
+    """
+    POST /api/servers/{instance_id}/restart
+    Stop the instance, then start it. Atomic restart operation.
+    """
+    try:
+        return restart_instance(instance_id)
+    except OrchestratorError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to restart instance")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 

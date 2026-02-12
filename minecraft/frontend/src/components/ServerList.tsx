@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { Server, ServerStats } from '../types';
-import { Play, Square, Settings, Users, Activity, Plus, Terminal, Trash } from 'lucide-react';
+import { Play, Square, Settings, Users, Activity, Plus, Trash } from 'lucide-react';
 
 interface ServerListProps {
     servers?: Server[];
+    compact?: boolean;
+    activeServerId?: string | null;
     onSelectServer: (serverId: string) => void;
     onCreateServer?: () => void;
     onUpdateServer?: (serverId: string, updates: Partial<Server>) => void;
@@ -15,6 +17,8 @@ interface ServerListProps {
 
 const ServerList: React.FC<ServerListProps> = ({
     servers = [],
+    compact = false,
+    activeServerId = null,
     onSelectServer,
     onCreateServer,
     onUpdateServer,
@@ -48,26 +52,26 @@ const ServerList: React.FC<ServerListProps> = ({
 
     return (
         <>
-        <div className="h-full flex flex-col p-2">
-            <div className="flex justify-between items-end mb-8">
+        <div className={`h-full flex flex-col p-2 ${compact ? 'p-2' : ''}`}>
+            <div className={`flex justify-between items-end ${compact ? 'mb-4' : 'mb-8'}`}>
                 <div>
-                    <h2 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-white to-text-muted mb-2">My Servers</h2>
-                    <p className="text-text-muted">Manage your instances and monitor performance.</p>
+                    <h2 className={`font-bold text-transparent bg-clip-text bg-gradient-to-r from-white to-text-muted ${compact ? 'text-xl mb-0' : 'text-3xl mb-2'}`}>My Servers</h2>
+                    {!compact && <p className="text-text-muted">Manage your instances and monitor performance.</p>}
                 </div>
                 <button
-                    className="flex items-center gap-2 px-5 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl shadow-glow shadow-primary/20 transition-all font-medium"
+                    className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-xl shadow-glow shadow-primary/20 transition-all font-medium text-sm"
                     onClick={onCreateServer}
                 >
-                    <Plus size={18} /> New Server
+                    <Plus size={16} /> New Server
                 </button>
             </div>
 
             {servers.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-border-main p-10 text-center text-text-muted">
+                <div className={`rounded-2xl border border-dashed border-border-main text-center text-text-muted ${compact ? 'p-6' : 'p-10'}`}>
                     No servers yet. Use the "New Server" button to add one.
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className={compact ? 'flex flex-col gap-2 overflow-y-auto' : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'}>
                     {servers.map((server) => {
                         const ramUsage = getRamUsage(server);
                         const ramLimit = getRamLimit(server);
@@ -76,20 +80,28 @@ const ServerList: React.FC<ServerListProps> = ({
                         const isStarting = server.status === 'STARTING';
                         const isPreparing = server.status === 'PREPARING';
                         return (
-                        <div key={server.id} className="glass-panel p-6 rounded-2xl relative group glass-panel-hover transition-all duration-300">
-                            <div className="flex justify-between items-start mb-6">
-                                <div className="flex gap-4">
-                                    <div className={`w-3 h-3 rounded-full mt-2 ${getStatusColor(server.status)}`}></div>
-                                    <div>
-                                        <h3 className="text-xl font-bold text-white group-hover:text-primary transition-colors">{server.name}</h3>
-                                        <div className="flex items-center gap-2 text-xs text-text-muted mt-1">
-                                            <span className="px-2 py-0.5 rounded bg-white/5 border border-white/5">{server.type} {server.version}</span>
+                        <div
+                            key={server.id}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => onSelectServer(server.id)}
+                            onKeyDown={(e) => e.key === 'Enter' && onSelectServer(server.id)}
+                            className={`glass-panel rounded-2xl relative group glass-panel-hover transition-all duration-300 cursor-pointer ${compact ? 'p-3' : 'p-6'}`}
+                        >
+                            <div className={`flex justify-between items-start ${compact ? 'mb-2' : 'mb-6'}`}>
+                                <div className="flex gap-3 flex-1 min-w-0">
+                                    <div className={`rounded-full shrink-0 ${getStatusColor(server.status)}`} style={{ width: compact ? 8 : 12, height: compact ? 8 : 12, marginTop: compact ? 4 : 8 }}></div>
+                                    <div className="min-w-0">
+                                        <h3 className={`font-bold text-white group-hover:text-primary transition-colors truncate ${compact ? 'text-sm' : 'text-xl'}`}>{server.name}</h3>
+                                        <div className="flex items-center gap-2 text-xs text-text-muted mt-0.5">
+                                            <span className="px-2 py-0.5 rounded bg-white/5 border border-white/5 shrink-0 truncate">{server.type} {server.version}</span>
                                             <span>:{server.port}</span>
                                         </div>
                                     </div>
                                 </div>
                             </div>
 
+                            {!compact && (
                             <div className="grid grid-cols-2 gap-4 mb-6">
                                 <div className="bg-bg-body/30 p-3 rounded-xl border border-white/5">
                                     <div className="flex items-center gap-2 text-xs text-text-muted mb-1">
@@ -114,15 +126,9 @@ const ServerList: React.FC<ServerListProps> = ({
                                     </div>
                                 </div>
                             </div>
+                            )}
 
-                            <div className="flex gap-3 mt-auto">
-                                <button 
-                                    onClick={() => onSelectServer(server.id)}
-                                    className="flex-1 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 text-white font-medium flex items-center justify-center gap-2 transition-colors border border-white/5"
-                                >
-                                    <Terminal size={16} /> Console
-                                </button>
-                                
+                            <div className={`flex gap-2 ${compact ? 'flex-wrap' : ''}`} onClick={(e) => e.stopPropagation()}>
                                 {isOnline ? (
                                     <button
                                         disabled={isStarting || isPreparing}

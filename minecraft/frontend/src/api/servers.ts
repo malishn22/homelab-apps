@@ -45,6 +45,11 @@ export async function stopServer(id: string): Promise<any> {
   return handleJson<any>(res);
 }
 
+export async function restartServer(id: string): Promise<any> {
+  const res = await fetch(build(`/servers/${id}/restart`), { method: 'POST' });
+  return handleJson<any>(res);
+}
+
 export async function deleteServer(id: string): Promise<void> {
   const res = await fetch(build(`/servers/${id}/delete`), {
     method: 'POST',
@@ -78,4 +83,43 @@ export async function sendCommand(id: string, command: string): Promise<any> {
     body: JSON.stringify({ command }),
   });
   return handleJson<any>(res);
+}
+
+export interface FileEntry {
+  name: string;
+  path: string;
+}
+
+export interface FilesResponse {
+  files?: FileEntry[];
+  dirs?: FileEntry[];
+  content?: string;
+}
+
+export async function getFiles(instanceId: string, path: string = ''): Promise<FilesResponse> {
+  const params = path ? `?path=${encodeURIComponent(path)}` : '';
+  const res = await fetch(build(`/servers/${instanceId}/files${params}`), { method: 'GET' });
+  return handleJson<FilesResponse>(res);
+}
+
+export async function writeFile(instanceId: string, path: string, content: string): Promise<void> {
+  const res = await fetch(build(`/servers/${instanceId}/files?path=${encodeURIComponent(path)}`), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'text/plain' },
+    body: content,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Write failed ${res.status}: ${text || res.statusText}`);
+  }
+}
+
+export async function deleteFile(instanceId: string, path: string): Promise<void> {
+  const res = await fetch(build(`/servers/${instanceId}/files?path=${encodeURIComponent(path)}`), {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Delete failed ${res.status}: ${text || res.statusText}`);
+  }
 }

@@ -15,6 +15,8 @@ from config import (
 from db import init_db
 from api.modpacks import router as modpacks_router
 from api.servers import router as servers_router
+from api.files import router as files_router
+from api.settings import router as settings_router
 
 
 app = FastAPI(title="Craft Control API", version="0.1.0")
@@ -45,6 +47,8 @@ def on_startup() -> None:
 #   /api/servers/...
 app.include_router(modpacks_router, prefix="/api")
 app.include_router(servers_router, prefix="/api")
+app.include_router(files_router, prefix="/api")
+app.include_router(settings_router, prefix="/api")
 
 
 if __name__ == "__main__":
