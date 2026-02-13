@@ -27,12 +27,11 @@ class ModpackProvider(abc.ABC):
         project_id: str,
         version_id: str,
         file_url: str,
-        instance_dir: Path,
-        extract_dir: Path,
+        server_dir: Path,
     ) -> Tuple[Path, Optional[str]]:
         """
-        Download and hydrate the server pack.
-        Returns (extract_root_path, detected_minecraft_version).
+        Download and hydrate the server pack into server_dir.
+        Returns (server_root_path, detected_minecraft_version).
         """
         pass
 

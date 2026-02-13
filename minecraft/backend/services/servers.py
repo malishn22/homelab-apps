@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Dict
 
-from schemas import CreateServerRequest
+from schemas import CreateServerRequest, UpdateServerRequest
 from orchestrator import (
     OrchestratorError,
     create_instance,
@@ -14,6 +14,7 @@ from orchestrator import (
     start_instance,
     stop_instance,
     tail_logs,
+    update_instance,
 )
 from services.modpacks import resolve_server_file_url
 
@@ -41,6 +42,11 @@ def create_server_instance(req: CreateServerRequest) -> Dict:
     return instance
 
 
+def update_server_instance(instance_id: str, req: UpdateServerRequest) -> Dict:
+    payload = req.model_dump(exclude_none=True)
+    return update_instance(instance_id, payload)
+
+
 __all__ = [
     "OrchestratorError",
     "create_server_instance",
@@ -52,4 +58,5 @@ __all__ = [
     "start_instance",
     "stop_instance",
     "tail_logs",
+    "update_server_instance",
 ]

@@ -13,5 +13,12 @@ class CreateServerRequest(BaseModel):
     ram_mb: int = Field(4096, ge=1024, le=32768)
 
 
+class UpdateServerRequest(BaseModel):
+    name: Optional[str] = None
+    port: Optional[int] = Field(None, ge=1, le=65535)
+    max_players: Optional[int] = Field(None, ge=1, le=1000)
+    ram_mb: Optional[int] = Field(None, ge=1024, le=32768)
+
+
 class CommandRequest(BaseModel):
     command: str

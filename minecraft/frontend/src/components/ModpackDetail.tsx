@@ -5,6 +5,7 @@ import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import type { Modpack, ModpackSource, ServerVersionOption, Server, InstallRequestOptions } from '../types';
 import { ArrowLeft, Download, Package, Tag, Server as ServerIcon, Users, Sparkles, Clock, CheckCircle2, X, MemoryStick, Plus } from 'lucide-react';
+import RamSlider from './RamSlider';
 import { fetchServerFiles, ServerVersion } from '../api/modpacks';
 
 interface ModpackDetailProps {
@@ -514,47 +515,15 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                                                     className="w-full rounded-lg bg-bg-surface/80 border border-border-main px-3 py-2 text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                                 />
                                             </div>
-                                            <div className="space-y-4 pt-4 border-t border-white/5 mt-4">
-                                                <div className="flex items-end justify-between gap-4">
-                                                    <label className="text-xs uppercase tracking-wide text-text-muted flex items-center gap-2 font-semibold">
-                                                        <MemoryStick size={14} className="text-primary" />
-                                                        RAM Allocation
-                                                    </label>
-                                                    <div className="flex items-center gap-2 bg-black/20 rounded-lg p-1.5 border border-white/5">
-                                                        <input
-                                                            type="number"
-                                                            min={1024}
-                                                            max={12288}
-                                                            step={128}
-                                                            value={ramMB}
-                                                            onChange={(e) => {
-                                                                let val = parseInt(e.target.value) || 0;
-                                                                setRamMB(val);
-                                                            }}
-                                                            className="w-16 bg-transparent text-right text-sm font-bold text-white focus:outline-none font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                                        />
-                                                        <span className="text-xs text-text-dim pr-1">MB</span>
-                                                    </div>
+                                            <div className="pt-4 border-t border-white/5 mt-4">
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <MemoryStick size={14} className="text-primary" />
+                                                    <span className="text-xs uppercase tracking-wide text-text-muted font-semibold">RAM Allocation</span>
                                                 </div>
-
-                                                <div className="space-y-2">
-                                                    <input
-                                                        type="range"
-                                                        min={1024}
-                                                        max={12288}
-                                                        step={128}
-                                                        value={ramMB}
-                                                        onChange={(e) => setRamMB(Number(e.target.value))}
-                                                        className="w-full h-2 bg-black/40 rounded-lg appearance-none cursor-pointer accent-primary hover:accent-primary/80 transition-all"
-                                                    />
-                                                    <div className="flex justify-between text-xs text-gray-200 font-mono px-2 font-bold bg-white/10 rounded-b-lg py-1.5 mt-1 border-t border-white/5">
-                                                        <span>1 GB</span>
-                                                        <span className={ramMB > 12288 ? "text-red-300" : "text-white"}>
-                                                            {(ramMB / 1024).toFixed(1)} GB
-                                                        </span>
-                                                        <span>12 GB</span>
-                                                    </div>
-                                                </div>
+                                                <RamSlider
+                                                    value={ramMB / 1024}
+                                                    onChange={(gb) => setRamMB(Math.round(gb * 1024))}
+                                                />
                                             </div>
                                         </div>
                                     ) : (

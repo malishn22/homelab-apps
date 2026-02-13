@@ -12,6 +12,13 @@ export type CreateServerPayload = {
   ram_mb: number;
 };
 
+export type UpdateServerPayload = {
+  name?: string;
+  port?: number;
+  max_players?: number;
+  ram_mb?: number;
+};
+
 async function handleJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = await res.text();
@@ -29,6 +36,15 @@ export async function listServers(): Promise<any[]> {
 export async function createServer(payload: CreateServerPayload): Promise<any> {
   const res = await fetch(build('/servers'), {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleJson<any>(res);
+}
+
+export async function updateServer(id: string, payload: UpdateServerPayload): Promise<any> {
+  const res = await fetch(build(`/servers/${id}`), {
+    method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });

@@ -7,9 +7,8 @@ import tempfile
 import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-import threading
-import time
 import re
+import threading
 
 import docker
 import requests
@@ -57,7 +56,6 @@ STATUS_STARTING = "STARTING"
 STATUS_STOPPING = "STOPPING"
 STATUS_ONLINE = "ONLINE"
 STATUS_ERROR = "ERROR"
-TPS_POLL_SECONDS = int(os.environ.get("MINECRAFT_TPS_POLL_SECONDS", "30"))
 PING_HOST = os.environ.get("MINECRAFT_PING_HOST", "host.docker.internal")
 
 LEGACY_JVM_ARGS_LINES = {
@@ -152,34 +150,13 @@ def _select_java_image(
     return f"eclipse-temurin:{java_major}-jre"
 
 
-def _parse_tps_from_logs(raw: str) -> Optional[float]:
-    lines = raw.splitlines()
-    tps_from_re = re.compile(r"tps from last[^:]*:\s*([0-9]+(?:\.[0-9]+)?)", re.I)
-    tps_re = re.compile(r"tps:\s*([0-9]+(?:\.[0-9]+)?)", re.I)
-
-    for line in reversed(lines):
-        match = tps_from_re.search(line)
-        if match:
-            try:
-                return float(match.group(1))
-            except ValueError:
-                continue
-        match = tps_re.search(line)
-        if match:
-            try:
-                return float(match.group(1))
-            except ValueError:
-                continue
-    return None
-
-
-def _ping_server_players(host: str, port: int) -> Optional[Tuple[int, int]]:
-    """Use Server List Ping (Java 1.7+) to get players online/max. Returns (online, max) or None."""
+def _ping_server_players(host: str, port: int) -> Optional[Tuple[int, int, float]]:
+    """Use Server List Ping (Java 1.7+) to get players and latency. Returns (online, max, latency_ms) or None."""
     try:
         from mcstatus import JavaServer
         server = JavaServer(host, port)
         status = server.status()
-        return (status.players.online, status.players.max)
+        return (status.players.online, status.players.max, status.latency)
     except Exception:
         return None
 
@@ -206,84 +183,20 @@ def _read_max_players_from_properties(server_dir: Path) -> Optional[int]:
     return None
 
 
-def _parse_tick_time_from_logs(raw: str) -> Optional[float]:
-    lines = raw.splitlines()
-    # NeoForge/Forge format: "Overall: 20.000 TPS (0.698 ms/tick)"
-    overall_ms_tick_re = re.compile(
-        r"overall\s*:.*?\(\s*([0-9]+(?:\.[0-9]+)?)\s*ms/tick\s*\)", re.I
-    )
-    # Legacy format: "overall : mean tick time: X.XXX ms"
-    overall_mean_re = re.compile(
-        r"overall\s*:\s*mean tick time:\s*([0-9]+(?:\.[0-9]+)?)\s*ms", re.I
-    )
-    generic_re = re.compile(r"mean tick time:\s*([0-9]+(?:\.[0-9]+)?)\s*ms", re.I)
-    # Fallback: any "X.XXX ms/tick" (prefer Overall line)
-    any_ms_tick_re = re.compile(r"\(\s*([0-9]+(?:\.[0-9]+)?)\s*ms/tick\s*\)", re.I)
-    best: Optional[float] = None
-
-    for line in reversed(lines):
-        match = overall_ms_tick_re.search(line)
-        if match:
-            try:
-                return float(match.group(1))
-            except ValueError:
-                continue
-        match = overall_mean_re.search(line)
-        if match:
-            try:
-                return float(match.group(1))
-            except ValueError:
-                continue
-        match = generic_re.search(line)
-        if match and best is None:
-            try:
-                best = float(match.group(1))
-            except ValueError:
-                continue
-        match = any_ms_tick_re.search(line)
-        if match and best is None:
-            try:
-                best = float(match.group(1))
-            except ValueError:
-                continue
-    return best
-
-
 def _should_hide_perf_line(line: str) -> bool:
-    """Hide TPS/dimension perf spam from forge tps / neoforge tps output."""
+    """Hide TPS/dimension perf spam and neoforge/forge tps command errors from logs."""
     lower = line.lower()
     if "mean tick time" in lower and "mean tps" in lower:
         return True
     if "tps" in lower and "ms/tick" in lower:
         return True
-    return False
-
-
-def _should_poll_tps(instance: Dict, server_dir: Path) -> bool:
-    loader = (instance.get("loader") or "").lower()
-    if "forge" in loader or "neoforge" in loader:
-        return True
-    if (server_dir / "libraries" / "net" / "minecraftforge" / "forge").exists():
-        return True
-    if (server_dir / "libraries" / "net" / "neoforged" / "neoforge").exists():
-        return True
-    if any(server_dir.glob("forge-*.jar")):
-        return True
-    if any(server_dir.glob("neoforge-*.jar")):
+    # Hide "Unknown or incomplete command... neoforge tps<--[HERE]" / "forge tps<--"
+    if "unknown or incomplete command" in lower:
+        if "neoforge tps" in lower or "forge tps" in lower:
+            return True
+    if "neoforge tps<--" in lower or "forge tps<--" in lower:
         return True
     return False
-
-
-def _tps_command_for_instance(instance: Dict, server_dir: Path) -> str:
-    """Return the TPS console command for the instance's loader (forge tps or neoforge tps)."""
-    loader = (instance.get("loader") or "").lower()
-    if "neoforge" in loader:
-        return "neoforge tps"
-    if (server_dir / "libraries" / "net" / "neoforged" / "neoforge").exists():
-        return "neoforge tps"
-    if any(server_dir.glob("neoforge-*.jar")):
-        return "neoforge tps"
-    return "forge tps"
 
 
 def _send_container_command(container, command: str) -> None:
@@ -310,12 +223,6 @@ def _server_run_dirs(instance_id: str) -> Tuple[Path, Path]:
     return server_dir_container, server_dir_host
 
 
-def _sync_extract_to_server(extract_dir: Path, server_dir: Path) -> None:
-    if server_dir.exists():
-        shutil.rmtree(server_dir)
-    shutil.copytree(extract_dir, server_dir)
-
-
 def _docker_client() -> docker.DockerClient:
     try:
         return docker.from_env()
@@ -336,6 +243,7 @@ def create_instance(
     file_url: str,
 ) -> Dict:
     instance_id = f"srv-{uuid.uuid4().hex[:8]}"
+    server_dir_container, _ = _server_run_dirs(instance_id)
     instance = {
         "id": instance_id,
         "name": name,
@@ -349,8 +257,8 @@ def create_instance(
         "file_url": file_url,
         "status": STATUS_PREPARING,
         "container_name": f"mc-{instance_id}",
-        "instance_dir": str(DATA_DIR / instance_id),
-        "extract_dir": str((DATA_DIR / instance_id) / "server"),
+        "instance_dir": str(server_dir_container),
+        "extract_dir": str(server_dir_container),
         "archive_path": "",
         "entry_target": None,
         "start_command": None,
@@ -431,33 +339,32 @@ def start_instance(instance_id: str) -> Dict:
     if container and container.status == "running":
         return {"status": STATUS_ONLINE}
 
-    extract_dir = Path(instance["extract_dir"])
     server_dir_container, server_dir_host = _server_run_dirs(instance_id)
 
     source_key = (instance.get("source") or "").strip().lower()
     mod_id = instance.get("project_id")
     file_id = instance.get("version_id")
     version_hint = instance.get("version_number")
-    try:
-        mod_id_int = int(mod_id) if mod_id is not None else None
-    except (TypeError, ValueError):
-        mod_id_int = None
-    try:
-        file_id_int = int(file_id) if file_id is not None else None
-    except (TypeError, ValueError):
-        file_id_int = None
 
-    # Preserve user edits: if server_dir exists (from a previous run), sync it back to
-    # extract_dir before overwriting, so edits made via the Files tab survive restarts.
-    if server_dir_container.exists():
-        try:
-            if extract_dir.exists():
-                shutil.rmtree(extract_dir)
-            shutil.copytree(server_dir_container, extract_dir)
-        except Exception as exc:
-            log.warning("Failed to preserve server_dir edits for %s: %s", instance_id, exc)
+    # Migration: existing instances may have pack in old extract_dir (instances/xxx/server).
+    # One-time copy to server_dir if server_dir is empty but extract_dir has content.
+    extract_dir_from_state = instance.get("extract_dir")
+    if extract_dir_from_state:
+        extract_path = Path(extract_dir_from_state)
+        if extract_path != server_dir_container and extract_path.exists():
+            # Check if server_dir is empty or missing but extract_dir has content
+            if not server_dir_container.exists() or not any(server_dir_container.iterdir()):
+                try:
+                    if server_dir_container.exists():
+                        shutil.rmtree(server_dir_container)
+                    shutil.copytree(extract_path, server_dir_container)
+                    log.info("Migrated instance %s from extract_dir to server_dir", instance_id)
+                    instance["instance_dir"] = str(server_dir_container)
+                    instance["extract_dir"] = str(server_dir_container)
+                    upsert_instance(instance)
+                except Exception as exc:
+                    log.warning("Migration failed for %s: %s", instance_id, exc)
 
-    _sync_extract_to_server(extract_dir, server_dir_container)
     apply_server_defaults(server_dir_container, instance_id)
     apply_whitelist_defaults(server_dir_container, instance_id)
     apply_ops_defaults(server_dir_container, instance_id)
@@ -570,6 +477,68 @@ def stop_instance(instance_id: str) -> Dict:
     return {"status": STATUS_OFFLINE}
 
 
+def _patch_server_properties_max_players(server_dir: Path, max_players: int) -> None:
+    """Update or add max-players in server.properties."""
+    props_path = server_dir / "server.properties"
+    content: str
+    if props_path.exists():
+        content = props_path.read_text(encoding="utf-8", errors="replace")
+    else:
+        content = ""
+
+    lines: List[str] = []
+    found = False
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key, _, val = line.partition("=")
+            if key.strip().lower() == "max-players":
+                lines.append(f"max-players={max_players}\n")
+                found = True
+                continue
+        lines.append(line + "\n" if not line.endswith("\n") else line)
+
+    if not found:
+        lines.append(f"max-players={max_players}\n")
+
+    props_path.parent.mkdir(parents=True, exist_ok=True)
+    props_path.write_text("".join(lines), encoding="utf-8")
+
+
+def update_instance(instance_id: str, payload: Dict) -> Dict:
+    """Update instance fields (name, port, max_players, ram_mb). If ram_mb changes and server is running, stop it first."""
+    instance = get_instance(instance_id)
+    if not instance:
+        raise OrchestratorError("Instance not found")
+
+    ram_mb_new = payload.get("ram_mb")
+    ram_mb_current = instance.get("ram_mb")
+    if ram_mb_new is not None and ram_mb_new != ram_mb_current:
+        container = _container_for(instance)
+        if container and container.status == "running":
+            stop_instance(instance_id)
+            instance = get_instance(instance_id)
+            if not instance:
+                raise OrchestratorError("Instance not found")
+
+    if "name" in payload and payload["name"] is not None:
+        instance["name"] = payload["name"]
+    if "port" in payload and payload["port"] is not None:
+        instance["port"] = payload["port"]
+    if "max_players" in payload and payload["max_players"] is not None:
+        instance["max_players"] = payload["max_players"]
+    if "ram_mb" in payload and payload["ram_mb"] is not None:
+        instance["ram_mb"] = payload["ram_mb"]
+
+    max_players = payload.get("max_players")
+    if max_players is not None:
+        _, server_dir_host = _server_run_dirs(instance_id)
+        _patch_server_properties_max_players(server_dir_host, max_players)
+
+    upsert_instance(instance)
+    return instance
+
+
 def restart_instance(instance_id: str) -> Dict:
     """Stop the instance, then start it. Atomic restart operation."""
     stop_instance(instance_id)
@@ -596,8 +565,7 @@ def instance_status(instance_id: str) -> Dict:
                 "ramUsage": 0,
                 "ramTotal": 0,
                 "cpuLoad": 0.0,
-                "tps": None,
-                "tickTimeMs": None,
+                "latency": None,
                 "players": 0,
                 "maxPlayers": 20,
             },
@@ -609,8 +577,7 @@ def instance_status(instance_id: str) -> Dict:
         "ramUsage": 0,
         "ramTotal": round((instance.get("ram_mb", 0) or 0) / 1024, 2),
         "cpuLoad": 0.0,
-        "tps": None,
-        "tickTimeMs": None,
+        "latency": None,
         "players": 0,
         "maxPlayers": _read_max_players_from_properties(server_dir_host) or 20,
     }
@@ -684,55 +651,25 @@ def instance_status(instance_id: str) -> Dict:
     except Exception as exc:  # pragma: no cover
         log.warning("Failed to read stats for %s: %s", instance_id, exc)
 
-    # TPS (optional): poll via console command and parse logs
+    # Players + latency from mcstatus Server List Ping
     max_from_props = _read_max_players_from_properties(server_dir_host)
     try:
-        now = time.time()
-        last_tps_at = instance.get("last_tps_at", 0) or 0
-        last_tps_request_at = instance.get("last_tps_request_at", 0) or 0
-        last_tick_at = instance.get("last_tick_time_at", 0) or 0
-        if running and status in {"ONLINE", "STARTING"}:
-            send_tps = (
-                now - last_tps_request_at >= TPS_POLL_SECONDS
-                and _should_poll_tps(instance, server_dir_container)
-            )
-            if send_tps:
-                tps_cmd = _tps_command_for_instance(instance, server_dir_container)
-                _send_container_command(container, tps_cmd)
-                instance["last_tps_request_at"] = now
-                upsert_instance(instance)
-                time.sleep(0.8)  # allow server to process command and write to stdout
-            if send_tps:
-                raw_logs = container.logs(tail=200).decode("utf-8", errors="ignore")
-                parsed_tps = _parse_tps_from_logs(raw_logs) if _should_poll_tps(instance, server_dir_container) else None
-                parsed_tick = _parse_tick_time_from_logs(raw_logs) if _should_poll_tps(instance, server_dir_container) else None
-                if parsed_tps is not None:
-                    instance["last_tps"] = parsed_tps
-                    instance["last_tps_at"] = now
-                    upsert_instance(instance)
-                if parsed_tick is not None:
-                    instance["last_tick_time_ms"] = parsed_tick
-                    instance["last_tick_time_at"] = now
-                    upsert_instance(instance)
-        stats["tps"] = instance.get("last_tps")
         if running and status in {"ONLINE", "STARTING"}:
             ping_result = _ping_server_players(PING_HOST, instance.get("port", 25565))
             if ping_result is not None:
                 stats["players"] = ping_result[0]
                 stats["maxPlayers"] = ping_result[1]
+                stats["latency"] = round(ping_result[2], 2)
             else:
                 stats["players"] = 0
                 stats["maxPlayers"] = max_from_props or 20
+                stats["latency"] = None
         else:
             stats["players"] = 0
             stats["maxPlayers"] = max_from_props or 20
-        stats["tickTimeMs"] = instance.get("last_tick_time_ms")
-        if last_tps_at and now - last_tps_at > max(TPS_POLL_SECONDS * 2, 120):
-            stats["tps"] = None
-        if last_tick_at and now - last_tick_at > max(TPS_POLL_SECONDS * 2, 120):
-            stats["tickTimeMs"] = None
+            stats["latency"] = None
     except Exception as exc:  # pragma: no cover
-        log.warning("Failed to read TPS for %s: %s", instance_id, exc)
+        log.warning("Failed to ping server for %s: %s", instance_id, exc)
 
     # ----------------------------------------------------------------------
     # State transitions with a running / stopped container
@@ -753,10 +690,6 @@ def instance_status(instance_id: str) -> Dict:
             # Container somehow started without us marking STARTING -> treat as ONLINE
             status = "ONLINE"
         # If status is already ONLINE or ERROR, leave it as-is.
-
-    # TPS: only 20 when fully ONLINE and running
-    if stats.get("tps") is None:
-        stats["tps"] = None
 
     instance["status"] = status
     upsert_instance(instance)

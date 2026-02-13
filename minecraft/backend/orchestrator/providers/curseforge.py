@@ -86,25 +86,23 @@ class CurseForgeProvider(ModpackProvider):
         project_id: str,
         version_id: str,
         file_url: str,
-        instance_dir: Path,
-        extract_dir: Path,
+        server_dir: Path,
     ) -> Tuple[Path, Optional[str]]:
-        
-        pack_path = instance_dir / "serverpack"
+        pack_path = server_dir / ".serverpack"
         pack_path.mkdir(parents=True, exist_ok=True)
         archive_path = pack_path / Path(file_url).name
-        
+
         _log_line(self.instance_id, f"[PREP] Downloading server pack {archive_path.name}")
         self._download(file_url, archive_path)
-        
+
         _log_line(self.instance_id, f"[PREP] Extracting {archive_path.name}")
-        self._extract_archive(archive_path, extract_dir)
-        
+        self._extract_archive(archive_path, server_dir)
+
         # Logic from _hydrate_curseforge_pack
-        manifest, pack_root = self._find_curseforge_manifest(extract_dir)
+        manifest, pack_root = self._find_curseforge_manifest(server_dir)
         if not manifest or not pack_root:
             _log_line(self.instance_id, "[PREP] CurseForge manifest not found; using archive contents only")
-            return extract_dir, None
+            return server_dir, None
 
         mc_version = None
         minecraft = manifest.get("minecraft") or {}
@@ -112,7 +110,7 @@ class CurseForgeProvider(ModpackProvider):
         if isinstance(version, str) and version.strip():
             mc_version = version.strip()
 
-        _log_line(self.instance_id, f"[PREP] CurseForge manifest found at {pack_root.relative_to(extract_dir) if pack_root != extract_dir else '.'}")
+        _log_line(self.instance_id, f"[PREP] CurseForge manifest found at {pack_root.relative_to(server_dir) if pack_root != server_dir else '.'}")
 
         files = manifest.get("files") or []
         mods_dir = pack_root / "mods"
@@ -120,7 +118,7 @@ class CurseForgeProvider(ModpackProvider):
         existing_mods = any(mods_dir.rglob("*.jar"))
 
         if existing_mods:
-             _log_line(self.instance_id, "[PREP] Using mods bundled with the server pack")
+            _log_line(self.instance_id, "[PREP] Using mods bundled with the server pack")
         else:
             total = len([entry for entry in files if entry.get("required") is not False])
             _log_line(self.instance_id, f"[PREP] Downloading {total} CurseForge files")
@@ -138,14 +136,14 @@ class CurseForgeProvider(ModpackProvider):
                     dest = mods_dir / filename
                     if dest.exists():
                         continue
-                    if False: # Too spammy to log every file
+                    if False:  # Too spammy to log every file
                         _log_line(self.instance_id, f"[PREP] Downloading {filename}")
                     self._download(url, dest)
                     downloaded += 1
                 except Exception as exc:
                     log.warning("Failed to download CurseForge file %s: %s", f_id, exc)
                     _log_line(self.instance_id, f"[PREP] Failed to download file {f_id}: {exc}")
-            
+
             _log_line(self.instance_id, f"[PREP] Downloaded {downloaded} CurseForge files")
 
         self._copy_overrides(pack_root)

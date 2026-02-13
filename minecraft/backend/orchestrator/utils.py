@@ -157,45 +157,10 @@ def detect_generic_start_command(root: Path, ram_mb: int, instance_id: Optional[
     all_files = list(root.rglob("*"))
     if instance_id:
         _log_line(instance_id, f"[INFO] DEBUG: Scanning {root} - Found {len(all_files)} files")
-        for f in all_files[:20]: # Increased to 20
+        for f in all_files[:20]:
             _log_line(instance_id, f"[INFO] DEBUG: File: {f.relative_to(root)}")
 
-    # 1. Unix Args
-    unix_args = next((p for p in root.rglob("unix_args.txt")), None)
-    if unix_args:
-        rel_args = unix_args.relative_to(root)
-        rel_dir = rel_args.parent.as_posix()
-        cd_prefix = f"cd {rel_dir} && " if rel_dir and rel_dir != "." else ""
-        jvm_opts = f"-Xms{ram_mb}M -Xmx{ram_mb}M"
-        command = [
-            "/bin/bash", "-c",
-            (f"{cd_prefix}if [ ! -f user_jvm_args.txt ]; then : > user_jvm_args.txt; fi; "
-             f"java {jvm_opts} @user_jvm_args.txt @{rel_args.as_posix()} nogui")
-        ]
-        return command, rel_args.as_posix()
-
-    # 2. Fabric Launch Jar (Moved up)
-    fabric_launch = next((p for p in root.rglob("fabric-server-launch.jar")), None)
-    if fabric_launch and fabric_launch.is_file():
-        rel_launch = fabric_launch.relative_to(root)
-        rel_dir = rel_launch.parent.as_posix()
-        cd_prefix = f"cd {rel_dir} && " if rel_dir and rel_dir != "." else ""
-        jvm_opts = f"-Xms{ram_mb}M -Xmx{ram_mb}M"
-        command = ["/bin/bash", "-c", f"{cd_prefix}java {jvm_opts} -jar {rel_launch.name} nogui"]
-        return command, rel_launch.as_posix()
-        
-    # 3. Fabric Installer (Moved up)
-    fabric_installer = next((p for p in root.rglob("*.jar") if "fabric-installer" in p.name.lower()), None)
-    if fabric_installer and fabric_installer.is_file():
-        rel_installer = fabric_installer.relative_to(root)
-        rel_dir = rel_installer.parent.as_posix()
-        cd_prefix = f"cd {rel_dir} && " if rel_dir and rel_dir != "." else ""
-        jvm_opts = f"-Xms{ram_mb}M -Xmx{ram_mb}M"
-        install_cmd = f"{cd_prefix}java -jar {rel_installer.name} server -downloadMinecraft"
-        run_cmd = f"{cd_prefix}java {jvm_opts} -jar fabric-server-launch.jar nogui"
-        return ["/bin/bash", "-c", f"{install_cmd} && {run_cmd}"], rel_installer.as_posix()
-
-    # 4. Start Scripts
+    # 1. Start Scripts - when they exist, always use them (prefer over launch/installer jars)
     def pick_script() -> Optional[Path]:
         scripts = [p for p in root.rglob("*") if p.suffix.lower() in {".sh", ".bat", ".cmd"}]
         # Filter out ServerPackCreator scripts
@@ -235,7 +200,28 @@ def detect_generic_start_command(root: Path, ram_mb: int, instance_id: Optional[
         command = ["/bin/bash", "-c", cmd_str]
         return command, rel.as_posix()
 
-    # 5. Generic Jar Fallback
+    # 2. Fabric Installer - install + run when fabric-installer.jar exists
+    fabric_installer = next((p for p in root.rglob("*.jar") if "fabric-installer" in p.name.lower()), None)
+    if fabric_installer and fabric_installer.is_file():
+        rel_installer = fabric_installer.relative_to(root)
+        rel_dir = rel_installer.parent.as_posix()
+        cd_prefix = f"cd {rel_dir} && " if rel_dir and rel_dir != "." else ""
+        jvm_opts = f"-Xms{ram_mb}M -Xmx{ram_mb}M"
+        install_cmd = f"{cd_prefix}java -jar {rel_installer.name} server -downloadMinecraft"
+        run_cmd = f"{cd_prefix}java {jvm_opts} -jar fabric-server-launch.jar nogui"
+        return ["/bin/bash", "-c", f"{install_cmd} && {run_cmd}"], rel_installer.as_posix()
+
+    # 3. Fabric Launch Jar - fallback when no start script
+    fabric_launch = next((p for p in root.rglob("fabric-server-launch.jar")), None)
+    if fabric_launch and fabric_launch.is_file():
+        rel_launch = fabric_launch.relative_to(root)
+        rel_dir = rel_launch.parent.as_posix()
+        cd_prefix = f"cd {rel_dir} && " if rel_dir and rel_dir != "." else ""
+        jvm_opts = f"-Xms{ram_mb}M -Xmx{ram_mb}M"
+        command = ["/bin/bash", "-c", f"{cd_prefix}java {jvm_opts} -jar {rel_launch.name} nogui"]
+        return command, rel_launch.as_posix()
+
+    # 4. Generic Jar Fallback - only when no start script or installer
     jar_candidates = [
         p for p in root.rglob("*.jar")
         if not any(part in {"libraries", "mods", "plugins"} for part in p.parts)

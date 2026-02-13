@@ -18,22 +18,12 @@ MAX_FILE_SIZE = 512 * 1024  # 512 KB
 
 
 def _instance_root(instance_id: str) -> Path:
-    """Return the instance server directory. Prefer runtime dir when it exists (used by container)."""
+    """Return the instance server directory (single directory for extract + runtime)."""
     instance = get_instance(instance_id)
     if not instance:
         raise OrchestratorError("Instance not found")
 
     server_dir_container, _ = _server_run_dirs(instance_id)
-    extract_dir = instance.get("extract_dir")
-    extract_path = Path(extract_dir) if extract_dir else None
-
-    # Prefer server_dir (runtime) when it exists - that's what the container uses
-    if server_dir_container.exists():
-        return server_dir_container
-    if extract_path and extract_path.exists():
-        return extract_path
-    if extract_dir:
-        return Path(extract_dir)
     return server_dir_container
 
 

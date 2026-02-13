@@ -5,7 +5,7 @@ from typing import Dict
 
 from fastapi import APIRouter, HTTPException, Query
 
-from schemas import CreateServerRequest, CommandRequest
+from schemas import CreateServerRequest, CommandRequest, UpdateServerRequest
 from services.servers import (
     OrchestratorError,
     create_server_instance,
@@ -17,6 +17,7 @@ from services.servers import (
     start_instance,
     stop_instance,
     tail_logs,
+    update_server_instance,
 )
 
 router = APIRouter(
@@ -110,6 +111,24 @@ def api_delete_instance_alias(instance_id: str) -> Dict:
     Alias for delete to match frontend if it uses POST instead of DELETE.
     """
     return api_delete_instance(instance_id)
+
+
+@router.patch("/{instance_id}")
+@router.put("/{instance_id}")
+def api_update_instance(instance_id: str, req: UpdateServerRequest) -> Dict:
+    """
+    PATCH/PUT /api/servers/{instance_id}
+    Update instance settings (name, port, max_players, ram_mb).
+    If ram_mb changes and server is running, it is stopped first.
+    """
+    try:
+        return update_server_instance(instance_id, req)
+    except OrchestratorError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to update instance")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
 
 @router.post("/{instance_id}/start")
 def api_start_instance(instance_id: str) -> Dict:

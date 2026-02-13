@@ -66,8 +66,7 @@ export interface ServerStats {
   ramUsage: number; // in GB
   ramTotal: number; // in GB
   cpuLoad: number; // percentage
-  tps: number | null; // ticks per second
-  tickTimeMs?: number | null;
+  latency?: number | null; // ping in ms
   status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'STOPPING' | 'MAINTENANCE' | 'PREPARING' | 'ERROR';
   players?: number;
   maxPlayers?: number;

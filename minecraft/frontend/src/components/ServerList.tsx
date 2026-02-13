@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { Server, ServerStats } from '../types';
 import { Play, Square, Settings, Users, Activity, Plus, Trash } from 'lucide-react';
+import RamSlider from './RamSlider';
 
 interface ServerListProps {
     servers?: Server[];
     compact?: boolean;
     onSelectServer: (serverId: string) => void;
     onCreateServer?: () => void;
-    onUpdateServer?: (serverId: string, updates: Partial<Server>) => void;
+    onUpdateServer?: (serverId: string, updates: Partial<Server>) => void | Promise<void>;
     onStartServer?: (serverId: string) => void;
     onStopServer?: (serverId: string) => void;
     onDeleteServer?: (serverId: string) => void;
@@ -27,6 +28,7 @@ const ServerList: React.FC<ServerListProps> = ({
 }) => {
     const [editing, setEditing] = useState<Server | null>(null);
     const [editForm, setEditForm] = useState<Partial<Server>>({});
+    const [isSaving, setIsSaving] = useState(false);
     const getStatusColor = (status: string) => {
         switch (status) {
             case 'ONLINE': return 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.4)]';
@@ -117,8 +119,10 @@ const ServerList: React.FC<ServerListProps> = ({
                                         <Users size={14} /> Players
                                     </div>
                                     <div className="text-lg font-semibold text-white">
-                                        {getPlayers(server) !== undefined && getMaxPlayers(server) !== undefined
-                                            ? `${getPlayers(server)} / ${getMaxPlayers(server)}`
+                                        {isOnline || isStarting || isPreparing
+                                            ? (getPlayers(server) !== undefined && getMaxPlayers(server) !== undefined
+                                                ? `${getPlayers(server)} / ${getMaxPlayers(server)}`
+                                                : '– / –')
                                             : '– / –'}
                                     </div>
                                 </div>
@@ -198,7 +202,8 @@ const ServerList: React.FC<ServerListProps> = ({
                                 <div className="text-2xl font-bold text-white mt-1">{editing.name}</div>
                                 <div className="text-xs text-text-muted mt-2 space-x-2">
                                     <span>ID: {editing.id}</span>
-                                    <span>• Players {getPlayers(displayServer) !== undefined && getMaxPlayers(displayServer) !== undefined
+                                    <span>• Players {(displayServer.status === 'ONLINE' || displayServer.status === 'STARTING' || displayServer.status === 'PREPARING')
+                                        && getPlayers(displayServer) !== undefined && getMaxPlayers(displayServer) !== undefined
                                         ? `${getPlayers(displayServer)}/${getMaxPlayers(displayServer)}`
                                         : '–/–'}</span>
                                     <span>• RAM {(() => {
@@ -249,21 +254,11 @@ const ServerList: React.FC<ServerListProps> = ({
                                     onChange={(e) => setEditForm((prev) => ({ ...prev, maxPlayers: parseInt(e.target.value, 10) || editing.maxPlayers }))}
                                 />
                             </div>
-                            <div className="space-y-2">
-                                <label className="text-xs text-text-dim block">RAM Limit (GB)</label>
-                                <input
-                                    type="number"
-                                    min={1}
-                                    className="w-full rounded-xl bg-bg-surface/80 border border-border-main px-4 py-3 text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary appearance-none"
-                                    value={editForm.ramLimit ?? editing.ramLimit}
-                                    onChange={(e) =>
-                                        setEditForm((prev) => ({
-                                            ...prev,
-                                            ramLimit: Math.max(1, parseFloat(e.target.value) || editing.ramLimit),
-                                        }))
-                                    }
-                                />
-                            </div>
+                            <RamSlider
+                                label="RAM Limit (GB)"
+                                value={editForm.ramLimit ?? editing.ramLimit ?? 4}
+                                onChange={(gb) => setEditForm((prev) => ({ ...prev, ramLimit: gb }))}
+                            />
                         </div>
 
                         <div className="mt-6 flex justify-end gap-3">
@@ -277,16 +272,23 @@ const ServerList: React.FC<ServerListProps> = ({
                                 Cancel
                             </button>
                             <button
-                                className="px-5 py-2.5 rounded-lg bg-primary text-white font-semibold hover:bg-primary/90 transition-colors"
-                                onClick={() => {
-                                    if (editing && onUpdateServer) {
-                                        onUpdateServer(editing.id, editForm);
+                                disabled={isSaving}
+                                className="px-5 py-2.5 rounded-lg bg-primary text-white font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                                onClick={async () => {
+                                    if (!editing || !onUpdateServer) return;
+                                    setIsSaving(true);
+                                    try {
+                                        await onUpdateServer(editing.id, editForm);
+                                        setEditing(null);
+                                        setEditForm({});
+                                    } catch {
+                                        // Error already shown via addNotifications in parent
+                                    } finally {
+                                        setIsSaving(false);
                                     }
-                                    setEditing(null);
-                                    setEditForm({});
                                 }}
                             >
-                                Save
+                                {isSaving ? 'Saving…' : 'Save'}
                             </button>
                         </div>
                     </div>

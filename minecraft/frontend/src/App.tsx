@@ -14,6 +14,7 @@ import type { InstallRequestOptions, Modpack, Server, ServerStats } from './type
 import type { DashboardTab } from './types';
 import { Bell, ChevronLeft, HelpCircle, Loader2 } from 'lucide-react';
 import { getModpackDetail } from './api/modpacks';
+import { updateServer as apiUpdateServer } from './api/servers';
 import { useServers, useServerLogsAndStats } from './hooks/useServers';
 
 type NotificationItem = {
@@ -152,26 +153,48 @@ const App: React.FC = () => {
         }
     };
 
-    const updateServer = (serverId: string, updates: Partial<Server>) => {
-        updateServerList(serverId, updates);
-        if (updates.ramLimit !== undefined || updates.status !== undefined) {
-            setServerStats((prev) => {
-                const current = prev[serverId];
-                if (!current) return prev;
-                return {
-                    ...prev,
-                    [serverId]: {
-                        ...current,
-                        ramTotal: updates.ramLimit ?? current.ramTotal,
-                        ramUsage:
-                            updates.ramLimit !== undefined
-                                ? Math.min(current.ramUsage, updates.ramLimit)
-                                : current.ramUsage,
-                        status: (updates.status as ServerStats['status']) ?? current.status,
-                    },
-                };
-            });
+    const updateServer = async (serverId: string, updates: Partial<Server>) => {
+        const server = servers.find((s) => s.id === serverId);
+        if (!server) return;
+
+        const ramLimit = updates.ramLimit ?? server.ramLimit;
+        const ramChanged = updates.ramLimit !== undefined && updates.ramLimit !== server.ramLimit;
+        const wasRunning = server.status === 'ONLINE' || server.status === 'STARTING';
+
+        const payload: { name?: string; port?: number; max_players?: number; ram_mb?: number } = {};
+        if (updates.name !== undefined) payload.name = updates.name;
+        if (updates.port !== undefined) payload.port = updates.port;
+        if (updates.maxPlayers !== undefined) payload.max_players = updates.maxPlayers;
+        if (updates.ramLimit !== undefined) payload.ram_mb = Math.round(ramLimit * 1024);
+
+        try {
+            await apiUpdateServer(serverId, payload);
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            addNotifications([`Failed to update server: ${msg}`]);
+            throw err;
         }
+
+        const mergedUpdates: Partial<Server> = { ...updates };
+        if (wasRunning && ramChanged) mergedUpdates.status = 'OFFLINE';
+
+        updateServerList(serverId, mergedUpdates);
+        setServerStats((prev) => {
+            const current = prev[serverId];
+            if (!current) return prev;
+            return {
+                ...prev,
+                [serverId]: {
+                    ...current,
+                    ramTotal: ramLimit,
+                    ramUsage:
+                        ramChanged
+                            ? Math.min(current.ramUsage, ramLimit)
+                            : current.ramUsage,
+                    status: (mergedUpdates.status as ServerStats['status']) ?? current.status,
+                },
+            };
+        });
     };
 
     const deleteServerInstance = (serverId: string) => {

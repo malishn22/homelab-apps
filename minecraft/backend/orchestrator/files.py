@@ -28,43 +28,39 @@ def prepare_instance_files(
 ) -> Dict:
     """
     Download and extract the server pack for an instance, delegating to the appropriate Provider.
+    Extracts directly into server_dir (single directory for extract + runtime).
     """
-    instance_dir = DATA_DIR / instance_id
-    extract_dir = instance_dir / "server"
-    
-    # Provider handles hydration
-    provider = get_provider(source, instance_id, instance_dir)
+    server_dir = CONTAINER_SERVERS_ROOT / instance_id
+    server_dir.mkdir(parents=True, exist_ok=True)
+
+    provider = get_provider(source, instance_id, server_dir)
     server_root, mc_version = provider.install_server_pack(
         project_id,
         version_id,
         file_url,
-        instance_dir,
-        extract_dir
+        server_dir,
     )
     apply_server_defaults(server_root, instance_id)
     apply_whitelist_defaults(server_root, instance_id)
     apply_ops_defaults(server_root, instance_id)
 
-    # Provider detects start command
     try:
         command, entry_target = provider.generate_start_command(
             server_root,
             ram_mb,
             project_id=project_id,
             version_id=version_id,
-            version_hint=None # We could parse hint from file_url if needed
+            version_hint=None,
         )
     except Exception as exc:
         log.warning("Start command detection failed for %s: %s", instance_id, exc)
         _log_line(instance_id, f"[FAIL] Could not detect start command: {exc}")
-        # Fallback to manual start? Or just error out?
-        # Original code raised, so we keep raising
         raise OrchestratorError(f"Could not detect start command: {exc}") from exc
 
     return {
-        "instance_dir": str(instance_dir),
-        "extract_dir": str(server_root),
-        "archive_path": "", # Deprecated/handled by provider
+        "instance_dir": str(server_dir),
+        "extract_dir": str(server_dir),
+        "archive_path": "",
         "entry_target": entry_target,
         "start_command": command,
         "minecraft_version": mc_version,

@@ -31,36 +31,34 @@ class ModrinthProvider(ModpackProvider):
         project_id: str,
         version_id: str,
         file_url: str,
-        instance_dir: Path,
-        extract_dir: Path,
+        server_dir: Path,
     ) -> Tuple[Path, Optional[str]]:
-        
-        pack_path = instance_dir / "serverpack"
+        pack_path = server_dir / ".serverpack"
         pack_path.mkdir(parents=True, exist_ok=True)
-        
+
         archive_path = pack_path / Path(file_url).name
         version_hint = unquote(archive_path.name)
-        
+
         _log_line(self.instance_id, f"[PREP] Downloading server pack {archive_path.name}")
         self._download(file_url, archive_path)
-        
+
         _log_line(self.instance_id, f"[PREP] Extracting {archive_path.name}")
-        self._extract_archive(archive_path, extract_dir)
-        
+        self._extract_archive(archive_path, server_dir)
+
         mc_version = None
-        
+
         # Hydrate based on file type
         if archive_path.suffix.lower() == ".mrpack":
-            self._hydrate_mrpack(extract_dir)
-            
+            self._hydrate_mrpack(server_dir)
+
         # Always strip client-only mods, as metadata is often incorrect
-        self._strip_client_only_mods(extract_dir)
+        self._strip_client_only_mods(server_dir)
         # Loader-aware strip: strip opposite loader mods
-        loader = self._detect_loader_from_index(extract_dir)
-        self._strip_loader_mismatch_mods(extract_dir, loader)
-        mc_version = self._detect_minecraft_version_from_root(extract_dir)
-            
-        return extract_dir, mc_version
+        loader = self._detect_loader_from_index(server_dir)
+        self._strip_loader_mismatch_mods(server_dir, loader)
+        mc_version = self._detect_minecraft_version_from_root(server_dir)
+
+        return server_dir, mc_version
 
     def generate_start_command(
         self,

@@ -135,8 +135,7 @@ export function useServerLogsAndStats(
                     ramUsage: 0,
                     ramTotal: server.ramLimit,
                     cpuLoad: 0,
-                    tps: null,
-                    tickTimeMs: null,
+                    latency: null,
                     status: server.status as ServerStats['status'],
                     players: server.players,
                     maxPlayers: server.maxPlayers,
@@ -190,11 +189,10 @@ export function useServerLogsAndStats(
                         ramUsage: stats.ramUsage ?? prev[serverId]?.ramUsage ?? 0,
                         ramTotal: stats.ramTotal ?? prev[serverId]?.ramTotal ?? 0,
                         cpuLoad: stats.cpuLoad ?? prev[serverId]?.cpuLoad ?? 0,
-                        tps: typeof stats.tps === 'number' ? stats.tps : prev[serverId]?.tps ?? null,
-                        tickTimeMs:
-                            typeof stats.tickTimeMs === 'number'
-                                ? stats.tickTimeMs
-                                : prev[serverId]?.tickTimeMs ?? null,
+                        latency:
+                            typeof stats.latency === 'number'
+                                ? stats.latency
+                                : prev[serverId]?.latency ?? null,
                         status: status as ServerStats['status'],
                         players: typeof stats.players === 'number' ? stats.players : prev[serverId]?.players ?? 0,
                         maxPlayers: typeof stats.maxPlayers === 'number' ? stats.maxPlayers : prev[serverId]?.maxPlayers ?? 5,
@@ -235,8 +233,7 @@ export function useServerLogsAndStats(
                         ramUsage: prev[serverId]?.ramUsage ?? 0,
                         ramTotal: prev[serverId]?.ramTotal ?? 0,
                         cpuLoad: prev[serverId]?.cpuLoad ?? 0,
-                        tps: prev[serverId]?.tps ?? null,
-                        tickTimeMs: prev[serverId]?.tickTimeMs ?? null,
+                        latency: prev[serverId]?.latency ?? null,
                         status: 'OFFLINE',
                         players: 0,
                         maxPlayers: prev[serverId]?.maxPlayers ?? 5,
@@ -344,8 +341,7 @@ export function useServerLogsAndStats(
                         ramUsage: 0,
                         ramTotal: server.ramLimit,
                         cpuLoad: 0,
-                        tps: null,
-                        tickTimeMs: null,
+                        latency: null,
                         status: 'OFFLINE' as const,
                     },
                 }));
