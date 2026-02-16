@@ -4,53 +4,24 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import type { Modpack, ModpackSource, ServerVersionOption, Server, InstallRequestOptions } from '../types';
-import { ArrowLeft, Download, Package, Tag, Server as ServerIcon, Users, Sparkles, Clock, CheckCircle2, X, MemoryStick, Plus } from 'lucide-react';
+import { ArrowLeft, Download, Package, Tag, Server as ServerIcon, Users, Sparkles, Clock, MemoryStick, Plus, X } from 'lucide-react';
 import RamSlider from './RamSlider';
+import ServerStatusBadge from './ServerStatusBadge';
+import ModpackProviderBadge from './ModpackProviderBadge';
 import { fetchServerFiles, ServerVersion } from '../api/modpacks';
+import { Button, Input, NumberInput, TagBadge, StatBadge } from './ui';
+import { isGameVersion, compareVersionsDesc, formatUpdated } from '../utils';
 
 interface ModpackDetailProps {
     modpack: Modpack;
+    serverStatusCache: Record<string, 'required' | 'unsupported'>;
+    onServerStatusUpdate: (updates: Record<string, 'required' | 'unsupported'>) => void;
     onBack: () => void;
     onInstall?: (modpack: Modpack, options?: InstallRequestOptions) => void;
     servers?: Server[];
     loading?: boolean;
     error?: string | null;
 }
-
-const isGameVersion = (value?: string): boolean => {
-    if (!value) return false;
-    const v = value.trim().toLowerCase();
-    if (v.includes('fabric') || v.includes('forge') || v.includes('loader') || v.includes('quilt')) return false;
-    const release = /^\d+(\.\d+){1,2}([.-](pre|rc)\d+)?$/i;
-    return release.test(v);
-};
-
-const compareVersionsDesc = (a?: string, b?: string): number => {
-    if (!a && !b) return 0;
-    if (!a) return 1;
-    if (!b) return -1;
-    const parse = (v: string) => v.split('.').map((n) => parseInt(n, 10) || 0);
-    const pa = parse(a);
-    const pb = parse(b);
-    const len = Math.max(pa.length, pb.length);
-    for (let i = 0; i < len; i++) {
-        const va = pa[i] ?? 0;
-        const vb = pb[i] ?? 0;
-        if (va !== vb) return vb - va;
-    }
-    return 0;
-};
-
-const formatUpdated = (dateStr?: string): string => {
-    if (!dateStr) return 'N/A';
-    const d = new Date(dateStr);
-    if (Number.isNaN(d.getTime())) return 'N/A';
-    return d.toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-    });
-};
 
 const getVersionStage = (value?: string): string | null => {
     if (!value) return null;
@@ -86,31 +57,17 @@ const VERSION_STAGE_BADGES: Record<string, { label: string; className: string }>
     },
 };
 
-const SOURCE_LABELS: Record<ModpackSource, string> = {
-    modrinth: 'Modrinth',
-    curseforge: 'CurseForge',
-    ftb: 'FTB',
-};
-
-const SOURCE_BADGES: Record<ModpackSource, { label: string; className: string }> = {
-    modrinth: {
-        label: 'Modrinth',
-        className: 'bg-violet-500/20 border-violet-400/50 text-violet-200',
-    },
-    curseforge: {
-        label: 'CurseForge',
-        className: 'bg-amber-500/20 border-amber-400/50 text-amber-200',
-    },
-    ftb: {
-        label: 'FTB',
-        className: 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200',
-    },
-};
-
-const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstall, loading, error, servers = [] }) => {
+const ModpackDetail: React.FC<ModpackDetailProps> = ({
+    modpack,
+    serverStatusCache,
+    onServerStatusUpdate,
+    onBack,
+    onInstall,
+    loading,
+    error,
+    servers = [],
+}) => {
     const sourceKey = (modpack.source || 'modrinth') as ModpackSource;
-    const sourceLabel = SOURCE_LABELS[sourceKey] || 'Modrinth';
-    const sourceBadge = SOURCE_BADGES[sourceKey] || SOURCE_BADGES.modrinth;
     const [isCheckingServers, setIsCheckingServers] = useState(false);
     const [serverVersions, setServerVersions] = useState<ServerVersionOption[]>([]);
     const [serverError, setServerError] = useState<string | null>(null);
@@ -179,6 +136,7 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
         const sourceKey = (modpack.source || 'modrinth') as ModpackSource;
         const isCurseforge = sourceKey === 'curseforge';
         if (!isCurseforge && (modpack.serverSide || '').toLowerCase() === 'unsupported') {
+            onServerStatusUpdate({ [modpack.id]: 'unsupported' });
             setServerError('This modpack is client-only. No server packs available.');
             setIsCheckingServers(false);
             setServerCheckComplete(true);
@@ -211,6 +169,7 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
 
             const hasServers = Boolean(resp.available && mapped.some((m) => m.serverSupported));
             setServerAvailable(hasServers);
+            onServerStatusUpdate({ [modpack.id]: hasServers ? 'required' : 'unsupported' });
             if (!hasServers) {
                 setServerError('No server-ready files found for this modpack yet.');
                 setSelectedVersionId(undefined);
@@ -247,14 +206,14 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
     }, [servers.length]);
 
     return (
-        <div className="h-full min-h-0 flex flex-col gap-6 animate-[fadeIn_0.3s_ease-out] overflow-y-auto pb-10">
+        <div className="min-h-full flex flex-col gap-6 animate-[fadeIn_0.3s_ease-out] pb-10">
             <div className="flex items-center gap-3">
-                <button
+                <Button
+                    variant="ghost"
+                    icon={<ArrowLeft size={18} />}
                     onClick={onBack}
-                    className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-text-muted hover:text-white border border-white/10 transition-colors"
-                >
-                    <ArrowLeft size={18} />
-                </button>
+                    className="rounded-full p-2 border border-white/10"
+                />
                 <div className="text-sm text-text-dim">Back to Modpacks</div>
             </div>
 
@@ -265,47 +224,46 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                     <div className="absolute bottom-4 left-6 right-6 flex items-center justify-between">
                         <div>
                             <div className="flex items-center gap-2 mb-2">
-                                <span
-                                    className={`inline-flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-semibold uppercase tracking-wider ${sourceBadge.className}`}
-                                >
-                                    {sourceLabel}
-                                </span>
+                                <ModpackProviderBadge provider={sourceKey} size={16} className="w-8 h-8" />
                             </div>
                             <h1 className="text-3xl font-bold text-white flex items-center gap-3">
                                 {modpack.title}
-                                {modpack.serverSide ? (
-                                    (modpack.serverSide || '').toLowerCase() === 'unsupported' ? (
-                                        <span className="inline-flex items-center gap-1 px-2 py-[2px] rounded-full bg-red-500/10 text-red-300 border border-red-500/30 text-[9px] leading-none uppercase tracking-wide">
-                                            <X size={10} /> Client only
-                                        </span>
-                                    ) : (
-                                        <span className="inline-flex items-center gap-1 px-2 py-[2px] rounded-full border border-emerald-500/50 text-emerald-300 bg-transparent text-[9px] leading-none uppercase tracking-wide">
-                                            <CheckCircle2 size={10} /> Server Exist
-                                        </span>
-                                    )
-                                ) : null}
+                                {(() => {
+                                    const cached = serverStatusCache[modpack.id];
+                                    const effective =
+                                        cached ??
+                                        (serverCheckComplete
+                                            ? serverAvailable
+                                                ? 'required'
+                                                : 'unsupported'
+                                            : (modpack.serverSide || 'pending').toLowerCase());
+                                    if (effective === 'pending') {
+                                        return <ServerStatusBadge status="pending" size={12} />;
+                                    }
+                                    if (effective === 'unsupported') {
+                                        return <ServerStatusBadge status="client" size={12} />;
+                                    }
+                                    return <ServerStatusBadge status="server" size={12} />;
+                                })()}
                             </h1>
                             <div className="text-sm text-text-muted">by {modpack.author}</div>
                         </div>
                         <div className="flex items-center gap-3">
                             {loading && <span className="text-text-dim text-xs">Loading…</span>}
-                            {serverAvailable && (
-                                <span className="inline-flex items-center gap-1 px-2 py-[2px] rounded-full border border-emerald-500/50 text-emerald-300 bg-transparent text-[9px] leading-none uppercase tracking-wide">
-                                    <CheckCircle2 size={10} /> Server Exist
-                                </span>
-                            )}
+                            {serverAvailable && <ServerStatusBadge status="server" size={12} />}
                             {!serverAvailable && serverCheckComplete && (
-                                <span className="px-3 py-1 rounded-full text-xs font-semibold border text-red-300 border-red-500/40 bg-red-500/10">
-                                    No server pack
-                                </span>
+                                <ServerStatusBadge status="client" size={12} />
                             )}
-                            <button
+                            <Button
+                                variant="primary"
+                                icon={<Download size={18} />}
+                                loading={isCheckingServers}
                                 onClick={handleInstallClick}
                                 disabled={isCheckingServers}
-                                className="px-4 py-2 rounded-xl bg-primary text-white font-semibold flex items-center gap-2 shadow-glow shadow-primary/30 hover:bg-primary/90 transition-colors disabled:opacity-60"
+                                className="rounded-xl shadow-glow shadow-primary/30"
                             >
-                                <Download size={18} /> {isCheckingServers ? 'Checking...' : 'Install'}
-                            </button>
+                                {isCheckingServers ? 'Checking...' : 'Install'}
+                            </Button>
                         </div>
                     </div>
                 </div>
@@ -314,32 +272,24 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                     <div className="flex flex-wrap gap-2">
                         {isMultiLoader
                             ? loaders.map((loader) => (
-                                <span
-                                    key={`loader-${loader}`}
-                                    className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-xs text-primary uppercase tracking-wider"
-                                >
-                                    <Sparkles size={12} /> {loader}
-                                </span>
+                                <TagBadge key={`loader-${loader}`} variant="primary" icon={<Sparkles size={12} />}>
+                                    {loader}
+                                </TagBadge>
                             ))
                             : primaryLoaderBase && (
-                                <span
-                                    className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-xs text-primary uppercase tracking-wider"
-                                >
-                                    <Sparkles size={12} /> {primaryLoaderBase}
-                                </span>
+                                <TagBadge variant="primary" icon={<Sparkles size={12} />}>
+                                    {primaryLoaderBase}
+                                </TagBadge>
                             )}
                         {latestVersion && (
-                            <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-xs text-primary uppercase tracking-wider">
-                                <Tag size={12} /> {latestVersion}
-                            </span>
+                            <TagBadge variant="primary" icon={<Tag size={12} />}>
+                                {latestVersion}
+                            </TagBadge>
                         )}
                         {categoryBadges.slice(0, 20).map((cat) => (
-                            <span
-                                key={cat}
-                                className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs text-text-muted uppercase tracking-wider"
-                            >
-                                <Tag size={12} /> {cat}
-                            </span>
+                            <TagBadge key={cat} variant="muted" icon={<Tag size={12} />}>
+                                {cat}
+                            </TagBadge>
                         ))}
                     </div>
 
@@ -356,6 +306,12 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                         </div>
                     )}
 
+                    <div className="flex flex-wrap gap-3">
+                        <StatBadge label="Downloads" value={modpack.downloads} icon={<Download size={14} />} />
+                        <StatBadge label="Followers" value={modpack.followers || 'N/A'} icon={<Users size={14} />} />
+                        <StatBadge label="Last Updated" value={formatUpdated(modpack.updatedAt)} icon={<Clock size={14} />} />
+                    </div>
+
                     <div className="border border-white/5 rounded-xl p-4 bg-bg-surface/60">
                         <div className="text-xs uppercase tracking-wider text-text-dim mb-3">Description</div>
                         <div className="prose prose-invert max-w-none text-text-muted text-[15px] leading-relaxed markdown-body">
@@ -368,30 +324,6 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                         </div>
                     </div>
 
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="flex items-center gap-2 p-3 rounded-xl bg-white/5 border border-white/10">
-                        <Download size={16} className="text-accent" />
-                        <div>
-                            <div className="text-xs uppercase tracking-wider text-text-dim">Downloads</div>
-                            <div className="text-sm text-white">{modpack.downloads}</div>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2 p-3 rounded-xl bg-white/5 border border-white/10">
-                        <Users size={16} className="text-accent" />
-                        <div>
-                            <div className="text-xs uppercase tracking-wider text-text-dim">Followers</div>
-                            <div className="text-sm text-white">{modpack.followers || 'N/A'}</div>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2 p-3 rounded-xl bg-white/5 border border-white/10">
-                        <Clock size={16} className="text-accent" />
-                        <div>
-                            <div className="text-xs uppercase tracking-wider text-text-dim">Last Updated</div>
-                            <div className="text-sm text-white">{formatUpdated(modpack.updatedAt)}</div>
-                        </div>
-                    </div>
                 </div>
             </div>
 
@@ -497,24 +429,19 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                                                     No servers yet. Provide a name and port to create one for this modpack.
                                                 </div>
                                             </div>
-                                            <div className="space-y-2">
-                                                <label className="block text-xs text-text-dim">Server name</label>
-                                                <input
-                                                    type="text"
-                                                    value={newServerName}
-                                                    onChange={(e) => setNewServerName(e.target.value)}
-                                                    className="w-full rounded-lg bg-bg-surface/80 border border-border-main px-3 py-2 text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                                                />
-                                            </div>
-                                            <div className="space-y-2">
-                                                <label className="block text-xs text-text-dim">Port</label>
-                                                <input
-                                                    type="number"
-                                                    value={newServerPort}
-                                                    onChange={(e) => setNewServerPort(parseInt(e.target.value, 10) || 25565)}
-                                                    className="w-full rounded-lg bg-bg-surface/80 border border-border-main px-3 py-2 text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                                />
-                                            </div>
+                                            <Input
+                                                label="Server name"
+                                                type="text"
+                                                value={newServerName}
+                                                onChange={(e) => setNewServerName(e.target.value)}
+                                            />
+                                            <NumberInput
+                                                label="Port"
+                                                value={newServerPort}
+                                                onChange={(e) => setNewServerPort(parseInt(e.target.value, 10) || 25565)}
+                                                min={1}
+                                                max={65535}
+                                            />
                                             <div className="pt-4 border-t border-white/5 mt-4">
                                                 <div className="flex items-center gap-2 mb-2">
                                                     <MemoryStick size={14} className="text-primary" />
@@ -574,8 +501,8 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
 
                         <div className="mt-5 flex justify-end gap-2 pt-4 border-t border-white/5">
                             {panelStep === 'server' && (
-                                <button
-                                    className="px-4 py-2 rounded-lg border border-border-main text-text-muted hover:text-white hover:border-white/40 transition-colors"
+                                <Button
+                                    variant="secondary"
                                     onClick={() => {
                                         if (isCreatingNew && servers.length > 0) {
                                             setIsCreatingNew(false);
@@ -585,17 +512,17 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                                     }}
                                 >
                                     Back
-                                </button>
+                                </Button>
                             )}
                             {panelStep === 'version' && (
-                                <button
+                                <Button
+                                    variant="primary"
                                     disabled={
                                         !selectedVersionId ||
                                         isCheckingServers ||
                                         !serverAvailable ||
                                         !serverVersions.find((v) => v.id === selectedVersionId && v.serverSupported !== false)
                                     }
-                                    className="px-4 py-2 rounded-lg bg-primary text-white font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
                                     onClick={() => {
                                         setPanelStep('server');
                                         if (servers.length > 0 && !selectedServerId) {
@@ -604,19 +531,19 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                                     }}
                                 >
                                     Continue
-                                </button>
+                                </Button>
                             )}
-                            <button
-                                className="px-4 py-2 rounded-lg border border-border-main text-text-muted hover:text-white hover:border-white/40 transition-colors"
+                            <Button
+                                variant="secondary"
                                 onClick={() => setShowServerPanel(false)}
                             >
                                 Cancel
-                            </button>
+                            </Button>
                             {panelStep === 'server' && (
                                 <>
                                     {servers.length === 0 || isCreatingNew ? (
-                                        <button
-                                            className="px-4 py-2 rounded-lg bg-primary text-white font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
+                                        <Button
+                                            variant="primary"
                                             disabled={
                                                 !selectedVersionId ||
                                                 !newServerName ||
@@ -637,16 +564,16 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                                             }}
                                         >
                                             Create server and continue
-                                        </button>
+                                        </Button>
                                     ) : (
-                                        <button
+                                        <Button
+                                            variant="primary"
                                             disabled={
                                                 !selectedServerId ||
                                                 !selectedVersionId ||
                                                 !serverAvailable ||
                                                 !serverVersions.find((v) => v.id === selectedVersionId && v.serverSupported !== false)
                                             }
-                                            className="px-4 py-2 rounded-lg bg-primary text-white font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60"
                                             onClick={() => {
                                                 setShowServerPanel(false);
                                                 onInstall?.(modpack, {
@@ -658,7 +585,7 @@ const ModpackDetail: React.FC<ModpackDetailProps> = ({ modpack, onBack, onInstal
                                             }}
                                         >
                                             Use selected server
-                                        </button>
+                                        </Button>
                                     )}
                                 </>
                             )}

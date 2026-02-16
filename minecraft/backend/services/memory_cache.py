@@ -1,53 +1,41 @@
 """
 In-memory cache for modpack search and CurseForge server pack data.
-Replaces the former PostgreSQL-backed cache.
+Backed by the generic TTLCache.
 """
 from __future__ import annotations
 
-import time
+import os
 from typing import Any, Dict, List, Optional
 
+from .ttl_cache import TTLCache
 
-_SEARCH_CACHE: Dict[str, tuple[float, Dict[str, Any]]] = {}
-_CURSEFORGE_SERVER_PACK_CACHE: Dict[int, tuple[float, Dict[str, Any]]] = {}
+_SEARCH_CACHE_TTL = int(os.environ.get("MODPACK_SEARCH_CACHE_TTL_SECONDS", "43200"))
+_search_cache: TTLCache[str, Dict[str, Any]] = TTLCache(ttl_seconds=_SEARCH_CACHE_TTL)
+_curseforge_server_pack_cache: TTLCache[int, Dict[str, Any]] = TTLCache(ttl_seconds=0)
 
 
-def get_search_cache(cache_key: str, ttl_seconds: int) -> Optional[Dict[str, Any]]:
-    entry = _SEARCH_CACHE.get(cache_key)
-    if not entry:
-        return None
-    ts, payload = entry
-    if time.time() - ts > ttl_seconds:
-        _SEARCH_CACHE.pop(cache_key, None)
-        return None
-    return payload
+def get_search_cache(cache_key: str) -> Optional[Dict[str, Any]]:
+    return _search_cache.get(cache_key)
 
 
 def set_search_cache(cache_key: str, payload: Dict[str, Any]) -> None:
-    _SEARCH_CACHE[cache_key] = (time.time(), payload)
+    _search_cache.set(cache_key, payload)
 
 
 def clear_search_cache(cache_key: str) -> None:
-    _SEARCH_CACHE.pop(cache_key, None)
+    _search_cache.delete(cache_key)
 
 
 def get_curseforge_server_pack_cache(
     mod_id: int, ttl_seconds: int
 ) -> Optional[Dict[str, Any]]:
-    entry = _CURSEFORGE_SERVER_PACK_CACHE.get(mod_id)
-    if not entry:
-        return None
-    ts, data = entry
-    if time.time() - ts > ttl_seconds:
-        _CURSEFORGE_SERVER_PACK_CACHE.pop(mod_id, None)
-        return None
-    return data
+    _curseforge_server_pack_cache._ttl = ttl_seconds
+    return _curseforge_server_pack_cache.get(mod_id)
 
 
 def set_curseforge_server_pack_cache(
     mod_id: int, has_server_pack: bool, server_files: Optional[List[Dict[str, Any]]] = None
 ) -> None:
-    _CURSEFORGE_SERVER_PACK_CACHE[mod_id] = (
-        time.time(),
-        {"has_server_pack": has_server_pack, "server_files": server_files},
+    _curseforge_server_pack_cache.set(
+        mod_id, {"has_server_pack": has_server_pack, "server_files": server_files}
     )

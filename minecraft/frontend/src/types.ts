@@ -67,7 +67,7 @@ export interface ServerStats {
   ramTotal: number; // in GB
   cpuLoad: number; // percentage
   latency?: number | null; // ping in ms
-  status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'STOPPING' | 'MAINTENANCE' | 'PREPARING' | 'ERROR';
+  status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'STOPPING' | 'RESTARTING' | 'MAINTENANCE' | 'PREPARING' | 'ERROR';
   players?: number;
   maxPlayers?: number;
   /** True after we received a status API response; until then players/maxPlayers are unknown */
@@ -80,7 +80,7 @@ export interface Server {
   type: string;
   version: string;
   port: number;
-  status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'MAINTENANCE' | 'PREPARING' | 'ERROR';
+  status: 'ONLINE' | 'OFFLINE' | 'STARTING' | 'STOPPING' | 'RESTARTING' | 'MAINTENANCE' | 'PREPARING' | 'ERROR';
   players: number;
   maxPlayers: number;
   ramUsage: number;

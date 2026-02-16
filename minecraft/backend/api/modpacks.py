@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 from services.modpack_search import (
     get_modpack_detail_cached,
     get_modpack_server_files,
+    get_server_status,
     search_modpacks,
 )
 
@@ -58,15 +59,34 @@ def api_search_modpacks(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.get("/{project_id}")
-def api_get_modpack_detail(project_id: str) -> Dict:
-    """Modrinth project detail with small TTL cache."""
+@router.get("/server-status")
+def api_get_server_status(
+    ids: str = "",
+    source: str = "modrinth",
+) -> Dict:
+    """
+    GET /api/modpacks/server-status?ids=id1,id2&source=curseforge|modrinth
+    Returns {"results": {"project_id": "required"|"unsupported", ...}}
+    """
     try:
-        return get_modpack_detail_cached(project_id)
+        project_ids = [x.strip() for x in ids.split(",") if x.strip()]
+        if not project_ids:
+            return {"results": {}}
+        results = get_server_status(project_ids, source)
+        return {"results": results}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/{project_id}")
+def api_get_modpack_detail(project_id: str, source: str = "modrinth") -> Dict:
+    """Modpack detail with small TTL cache. Supports modrinth and curseforge sources."""
+    try:
+        return get_modpack_detail_cached(project_id, source=source)
     except requests.HTTPError as exc:
         raise HTTPException(
             status_code=exc.response.status_code if exc.response else 502,
-            detail=f"Modrinth error: {exc}",
+            detail=f"Modpack detail error: {exc}",
         ) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

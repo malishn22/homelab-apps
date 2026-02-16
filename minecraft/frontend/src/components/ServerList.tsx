@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import { Server, ServerStats } from '../types';
-import { Play, Square, Settings, Users, Activity, Plus, Trash } from 'lucide-react';
+import { Settings, Users, Activity, Plus, Trash } from 'lucide-react';
 import RamSlider from './RamSlider';
+import { Button, Input, NumberInput } from './ui';
+import ServerActionButtonController from './ServerActionButtonController';
+import { getStatusDotColor } from '../utils';
 
 interface ServerListProps {
     servers?: Server[];
@@ -11,6 +14,7 @@ interface ServerListProps {
     onUpdateServer?: (serverId: string, updates: Partial<Server>) => void | Promise<void>;
     onStartServer?: (serverId: string) => void;
     onStopServer?: (serverId: string) => void;
+    onRestartServer?: (serverId: string) => void;
     onDeleteServer?: (serverId: string) => void;
     statsById?: Record<string, ServerStats>;
 }
@@ -23,23 +27,13 @@ const ServerList: React.FC<ServerListProps> = ({
     onUpdateServer,
     onStartServer,
     onStopServer,
+    onRestartServer,
     onDeleteServer,
     statsById = {},
 }) => {
     const [editing, setEditing] = useState<Server | null>(null);
     const [editForm, setEditForm] = useState<Partial<Server>>({});
     const [isSaving, setIsSaving] = useState(false);
-    const getStatusColor = (status: string) => {
-        switch (status) {
-            case 'ONLINE': return 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.4)]';
-            case 'OFFLINE': return 'bg-zinc-500';
-            case 'STARTING': return 'bg-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.4)]';
-            case 'PREPARING': return 'bg-blue-400 shadow-[0_0_10px_rgba(96,165,250,0.4)]';
-            case 'ERROR': return 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.4)]';
-            case 'MAINTENANCE': return 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.4)]';
-            default: return 'bg-zinc-500';
-        }
-    };
     const getStatsForServer = (server: Server): ServerStats | undefined => statsById[server.id];
     const getRamUsage = (server: Server): number | undefined => {
         const stats = getStatsForServer(server);
@@ -69,12 +63,14 @@ const ServerList: React.FC<ServerListProps> = ({
                     <h2 className={`font-bold text-transparent bg-clip-text bg-gradient-to-r from-white to-text-muted ${compact ? 'text-xl mb-0' : 'text-3xl mb-2'}`}>My Servers</h2>
                     {!compact && <p className="text-text-muted">Manage your instances and monitor performance.</p>}
                 </div>
-                <button
-                    className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-xl shadow-glow shadow-primary/20 transition-all font-medium text-sm"
+                <Button
+                    variant="primary"
+                    icon={<Plus size={16} />}
                     onClick={onCreateServer}
+                    className="rounded-xl shadow-glow shadow-primary/20 font-medium text-sm"
                 >
-                    <Plus size={16} /> New Server
-                </button>
+                    New Server
+                </Button>
             </div>
 
             {servers.length === 0 ? (
@@ -90,6 +86,7 @@ const ServerList: React.FC<ServerListProps> = ({
                         const isOnline = server.status === 'ONLINE';
                         const isStarting = server.status === 'STARTING';
                         const isPreparing = server.status === 'PREPARING';
+
                         return (
                         <div
                             key={server.id}
@@ -101,7 +98,7 @@ const ServerList: React.FC<ServerListProps> = ({
                         >
                             <div className={`flex justify-between items-start ${compact ? 'mb-2' : 'mb-6'}`}>
                                 <div className="flex gap-3 flex-1 min-w-0">
-                                    <div className={`rounded-full shrink-0 ${getStatusColor(server.status)}`} style={{ width: compact ? 8 : 12, height: compact ? 8 : 12, marginTop: compact ? 4 : 8 }}></div>
+                                    <div className={`rounded-full shrink-0 ${getStatusDotColor(server.status)}`} style={{ width: compact ? 8 : 12, height: compact ? 8 : 12, marginTop: compact ? 4 : 8 }}></div>
                                     <div className="min-w-0">
                                         <h3 className={`font-bold text-white group-hover:text-primary transition-colors truncate ${compact ? 'text-sm' : 'text-xl'}`}>{server.name}</h3>
                                         <div className="flex items-center gap-2 text-xs text-text-muted mt-0.5">
@@ -144,42 +141,33 @@ const ServerList: React.FC<ServerListProps> = ({
                             )}
 
                             <div className={`flex gap-2 ${compact ? 'flex-wrap' : ''}`} onClick={(e) => e.stopPropagation()}>
-                                {isOnline ? (
-                                    <button
-                                        disabled={isStarting || isPreparing}
-                                        onClick={() => onStopServer?.(server.id)}
-                                        className="p-2.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                                    >
-                                        <Square size={18} fill="currentColor" />
-                                    </button>
-                                ) : (
-                                    <button
-                                        disabled={isStarting || isPreparing}
-                                        onClick={() => onStartServer?.(server.id)}
-                                        className="p-2.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 border border-emerald-500/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                                    >
-                                        <Play size={18} fill="currentColor" />
-                                    </button>
-                                )}
-                                <button
-                                    className="p-2.5 rounded-lg bg-white/5 hover:bg-white/10 text-text-muted hover:text-white transition-colors border border-white/5"
+                                <ServerActionButtonController
+                                    serverId={server.id}
+                                    status={server.status}
+                                    onStart={() => onStartServer?.(server.id)}
+                                    onStop={() => onStopServer?.(server.id)}
+                                    onRestart={() => onRestartServer?.(server.id)}
+                                    layout="compact"
+                                />
+                                <Button
+                                    variant="ghost"
+                                    icon={<Settings size={18} />}
                                     onClick={() => {
                                         setEditing(server);
                                         setEditForm(server);
                                     }}
-                                >
-                                    <Settings size={18} />
-                                </button>
-                                <button
-                                    className="p-2.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 transition-colors"
+                                    className="p-2.5 border border-white/5"
+                                />
+                                <Button
+                                    variant="danger"
+                                    icon={<Trash size={18} />}
                                     onClick={() => {
                                         if (window.confirm(`Delete server "${server.name}"? This cannot be undone.`)) {
                                             onDeleteServer?.(server.id);
                                         }
                                     }}
-                                >
-                                    <Trash size={18} />
-                                </button>
+                                    className="p-2.5"
+                                />
                             </div>
                         </div>
                         );
@@ -230,50 +218,53 @@ const ServerList: React.FC<ServerListProps> = ({
                         })()}
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="space-y-2 md:col-span-2">
-                                <label className="text-xs text-text-dim block">Name</label>
-                                <input
-                                    className="w-full rounded-xl bg-bg-surface/80 border border-border-main px-4 py-3 text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                            <div className="md:col-span-2">
+                                <Input
+                                    label="Name"
                                     value={editForm.name || ''}
                                     onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))}
+                                    className="rounded-xl px-4 py-3"
                                 />
                             </div>
-                            <div className="space-y-2">
-                                <label className="text-xs text-text-dim block">Port</label>
-                                <input
-                                    className="w-full rounded-xl bg-bg-surface/80 border border-border-main px-4 py-3 text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary appearance-none"
-                                    value={editForm.port || ''}
-                                    onChange={(e) => setEditForm((prev) => ({ ...prev, port: parseInt(e.target.value, 10) || editing.port }))}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <label className="text-xs text-text-dim block">Max Players</label>
-                                <input
-                                    className="w-full rounded-xl bg-bg-surface/80 border border-border-main px-4 py-3 text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary appearance-none"
-                                    value={editForm.maxPlayers ?? editing.maxPlayers}
-                                    onChange={(e) => setEditForm((prev) => ({ ...prev, maxPlayers: parseInt(e.target.value, 10) || editing.maxPlayers }))}
-                                />
-                            </div>
-                            <RamSlider
-                                label="RAM Limit (GB)"
-                                value={editForm.ramLimit ?? editing.ramLimit ?? 4}
-                                onChange={(gb) => setEditForm((prev) => ({ ...prev, ramLimit: gb }))}
+                            <NumberInput
+                                label="Port"
+                                value={editForm.port ?? ''}
+                                onChange={(e) => setEditForm((prev) => ({ ...prev, port: parseInt(e.target.value, 10) || editing.port }))}
+                                min={1}
+                                max={65535}
+                                className="rounded-xl [&_input]:px-4 [&_input]:py-3"
                             />
+                            <NumberInput
+                                label="Max Players"
+                                value={editForm.maxPlayers ?? editing.maxPlayers ?? ''}
+                                onChange={(e) => setEditForm((prev) => ({ ...prev, maxPlayers: parseInt(e.target.value, 10) || editing.maxPlayers }))}
+                                min={1}
+                                max={65535}
+                                className="rounded-xl [&_input]:px-4 [&_input]:py-3"
+                            />
+                            <div className="space-y-2 md:col-span-2">
+                                <RamSlider
+                                    label="RAM Limit (GB)"
+                                    value={editForm.ramLimit ?? editing.ramLimit ?? 4}
+                                    onChange={(gb) => setEditForm((prev) => ({ ...prev, ramLimit: gb }))}
+                                />
+                            </div>
                         </div>
 
                         <div className="mt-6 flex justify-end gap-3">
-                            <button
-                                className="px-5 py-2.5 rounded-lg border border-border-main text-text-muted hover:text-white hover:border-white/40 transition-colors"
+                            <Button
+                                variant="secondary"
                                 onClick={() => {
                                     setEditing(null);
                                     setEditForm({});
                                 }}
                             >
                                 Cancel
-                            </button>
-                            <button
+                            </Button>
+                            <Button
+                                variant="primary"
+                                loading={isSaving}
                                 disabled={isSaving}
-                                className="px-5 py-2.5 rounded-lg bg-primary text-white font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                                 onClick={async () => {
                                     if (!editing || !onUpdateServer) return;
                                     setIsSaving(true);
@@ -289,7 +280,7 @@ const ServerList: React.FC<ServerListProps> = ({
                                 }}
                             >
                                 {isSaving ? 'Saving…' : 'Save'}
-                            </button>
+                            </Button>
                         </div>
                     </div>
                 </div>

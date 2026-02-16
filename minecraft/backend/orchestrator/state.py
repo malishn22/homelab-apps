@@ -29,7 +29,10 @@ STATE_FILE = DATA_DIR / "instances.json"
 
 _log_buffers: Dict[str, List[str]] = {}
 _log_lock = threading.Lock()
-_hydrate_semaphore = threading.Semaphore(2)  # limit concurrent hydrations to a reasonable level
+_hydrate_semaphore = threading.Semaphore(2)
+
+# Thread lock protecting all read-modify-write cycles on instances.json
+_state_lock = threading.Lock()
 
 
 class OrchestratorError(Exception):
@@ -44,6 +47,7 @@ def ensure_dirs() -> None:
 
 
 def load_instances() -> List[Dict]:
+    """Load instances from disk. Safe to call without the lock for read-only access."""
     ensure_dirs()
     for _ in range(3):
         try:
@@ -54,6 +58,7 @@ def load_instances() -> List[Dict]:
 
 
 def save_instances(instances: List[Dict]) -> None:
+    """Atomically write instances to disk. Must be called under _state_lock."""
     ensure_dirs()
     payload = json.dumps(instances, indent=2)
     tmp_path = STATE_FILE.with_suffix(".tmp")
@@ -62,10 +67,12 @@ def save_instances(instances: List[Dict]) -> None:
 
 
 def upsert_instance(instance: Dict) -> Dict:
-    instances = load_instances()
-    filtered = [i for i in instances if i.get("id") != instance.get("id")]
-    filtered.append(instance)
-    save_instances(filtered)
+    """Thread-safe upsert: load -> filter -> append -> save under lock."""
+    with _state_lock:
+        instances = load_instances()
+        filtered = [i for i in instances if i.get("id") != instance.get("id")]
+        filtered.append(instance)
+        save_instances(filtered)
     return instance
 
 

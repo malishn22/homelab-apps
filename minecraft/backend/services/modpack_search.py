@@ -49,7 +49,17 @@ CURSEFORGE_SORT_FIELDS = {
     "downloads": 6,
     "updated": 3,
     "relevance": 2,
+    "popularity": 2,  # follows/thumbsUp
     "follows": 2,
+    "dateCreated": 1,
+}
+MODRINTH_SORT_INDEX = {
+    "relevance": "relevance",
+    "downloads": "downloads",
+    "popularity": "follows",
+    "follows": "follows",
+    "updated": "newest",
+    "dateCreated": "newest",  # Modrinth has no creation-date sort; use newest
 }
 SEARCH_CACHE_TTL_SECONDS = int(os.environ.get("MODPACK_SEARCH_CACHE_TTL_SECONDS", "43200"))
 CURSEFORGE_SERVER_PACK_TTL_SECONDS = int(os.environ.get("CURSEFORGE_SERVER_PACK_TTL_SECONDS", "43200"))
@@ -97,11 +107,12 @@ def _fetch_modrinth_search(
         if cached:
             return cached
 
+    modrinth_index = MODRINTH_SORT_INDEX.get(sort, "relevance")
     params = {
         "query": query,
         "offset": page * limit,
         "limit": limit,
-        "index": sort,
+        "index": modrinth_index,
         "facets": '[["project_type:modpack"]]',
     }
     resp = requests.get(
@@ -529,9 +540,8 @@ def _curseforge_has_server_pack(
         return False
 
 
-def _map_curseforge_hit(
-    item: Dict[str, Any], detail: Dict[str, Any] | None = None
-) -> Dict[str, Any]:
+def _map_curseforge_hit_fast(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Map CurseForge hit without server pack scan. server_side is always 'pending'."""
     authors = item.get("authors") or []
     author_name = authors[0].get("name") if authors else None
     categories = [c.get("name") for c in item.get("categories") or [] if c.get("name")]
@@ -540,7 +550,6 @@ def _map_curseforge_hit(
     loaders = _extract_curseforge_loaders(item)
     loaders.extend(_extract_curseforge_loaders_from_versions(game_versions))
     loaders = sorted(set(loaders))
-    has_server_pack = _curseforge_has_server_pack(item, detail)
     return {
         "project_id": str(item.get("id") or ""),
         "slug": item.get("slug") or str(item.get("id") or ""),
@@ -555,7 +564,7 @@ def _map_curseforge_hit(
         "categories": categories,
         "game_versions": game_versions,
         "loaders": loaders,
-        "server_side": "required" if has_server_pack else "unsupported",
+        "server_side": "pending",
         "icon_url": logo.get("url"),
         "source": "curseforge",
     }
@@ -576,7 +585,7 @@ def _parse_timestamp(value: Any) -> int:
 def _sort_hits(hits: List[Dict[str, Any]], sort: str) -> List[Dict[str, Any]]:
     if sort == "downloads":
         return sorted(hits, key=lambda hit: hit.get("downloads", 0), reverse=True)
-    if sort == "updated":
+    if sort in ("updated",):
         return sorted(
             hits,
             key=lambda hit: _parse_timestamp(
@@ -584,7 +593,13 @@ def _sort_hits(hits: List[Dict[str, Any]], sort: str) -> List[Dict[str, Any]]:
             ),
             reverse=True,
         )
-    if sort == "follows":
+    if sort == "dateCreated":
+        return sorted(
+            hits,
+            key=lambda hit: _parse_timestamp(hit.get("date_created")),
+            reverse=True,
+        )
+    if sort in ("follows", "popularity"):
         return sorted(
             hits,
             key=lambda hit: hit.get("followers") if hit.get("followers") is not None else hit.get("follows", 0),
@@ -632,6 +647,56 @@ def _build_curseforge_server_files(mod_id: int, force: bool = False) -> Dict[str
     return {"available": available, "versions": versions}
 
 
+def get_server_status(
+    project_ids: List[str], source: str
+) -> Dict[str, str]:
+    """
+    Returns { project_id: "required"|"unsupported", ... } for each project.
+    Used for lazy-loading server status in the UI.
+    """
+    source_key = (source or "").strip().lower()
+    results: Dict[str, str] = {}
+
+    if source_key == "curseforge":
+        for pid in project_ids:
+            if not pid:
+                continue
+            mod_id = _coerce_mod_id(pid)
+            if mod_id is None:
+                results[pid] = "unsupported"
+                continue
+            try:
+                has_pack = _curseforge_has_server_pack({"id": mod_id}, None)
+                results[pid] = "required" if has_pack else "unsupported"
+            except Exception:
+                results[pid] = "unsupported"
+
+    elif source_key == "modrinth":
+        for pid in project_ids:
+            if not pid:
+                continue
+            try:
+                detail = modrinth_get_modpack_detail(
+                    base_url=MODRINTH_BASE_URL,
+                    user_agent=MODRINTH_USER_AGENT,
+                    project_id=pid,
+                )
+                ss = (detail.get("server_side") or "").lower()
+                if ss in ("required", "optional"):
+                    results[pid] = "required"
+                else:
+                    results[pid] = "unsupported"
+            except Exception:
+                results[pid] = "unsupported"
+
+    else:
+        for pid in project_ids:
+            if pid:
+                results[pid] = "unsupported"
+
+    return results
+
+
 # --- Public API for api/modpacks.py ---
 
 
@@ -653,7 +718,7 @@ def search_modpacks(
     if force:
         clear_search_cache(cache_key)
     else:
-        cached = get_search_cache(cache_key, SEARCH_CACHE_TTL_SECONDS)
+        cached = get_search_cache(cache_key)
         if cached:
             return cached
 
@@ -670,32 +735,16 @@ def search_modpacks(
         try:
             if source == "modrinth":
                 data = _fetch_modrinth_search(query, page, source_limit, sort, force=force)
-                mod_hits = [{**hit, "source": "modrinth"} for hit in (data.get("hits") or [])]
+                mod_hits = [
+                    {**hit, "source": "modrinth", "server_side": "pending"}
+                    for hit in (data.get("hits") or [])
+                ]
                 hits.extend(mod_hits)
                 total_hits += data.get("total_hits", len(mod_hits))
             elif source == "curseforge":
                 data = _fetch_curseforge_search(query, page, source_limit, sort, force=force)
                 items = data.get("data") or []
-                detail_map: Dict[int, Dict[str, Any]] = {}
-                if items:
-                    try:
-                        ids = [_coerce_mod_id(item.get("id")) for item in items]
-                        ids = [i for i in ids if i is not None]
-                        if ids:
-                            detail_map = _fetch_curseforge_mod_details(ids, force=force)
-                    except requests.HTTPError as exc:
-                        errors.append({
-                            "source": "curseforge-detail",
-                            "status": exc.response.status_code if exc.response else 502,
-                            "detail": exc.response.text if exc.response else str(exc),
-                        })
-                    except Exception as exc:
-                        errors.append({"source": "curseforge-detail", "status": 500, "detail": str(exc)})
-                mapped_hits = []
-                for item in items:
-                    mid = _coerce_mod_id(item.get("id"))
-                    detail = detail_map.get(mid) if mid is not None else None
-                    mapped_hits.append(_map_curseforge_hit(item, detail))
+                mapped_hits = [_map_curseforge_hit_fast(item) for item in items]
                 hits.extend(mapped_hits)
                 pagination = data.get("pagination") or {}
                 total_hits += pagination.get("totalCount", len(mapped_hits))
@@ -726,11 +775,40 @@ def search_modpacks(
     return response
 
 
-def get_modpack_detail_cached(project_id: str) -> Dict[str, Any]:
+def _normalize_curseforge_mod_detail(detail: Dict[str, Any]) -> Dict[str, Any]:
+    """Map CurseForge mod detail to Modrinth-like shape for frontend merge."""
+    logo = detail.get("logo") or {}
+    categories = [c.get("name") for c in (detail.get("categories") or []) if c.get("name")]
+    loaders = _extract_curseforge_loaders(detail)
+    game_versions = _extract_curseforge_game_versions(detail)
+    full_desc = detail.get("description") or detail.get("summary") or ""
+    return {
+        "body": full_desc,
+        "description": detail.get("summary") or full_desc or "No description available.",
+        "icon_url": logo.get("url"),
+        "slug": detail.get("slug") or str(detail.get("id") or ""),
+        "categories": categories,
+        "loaders": loaders,
+        "game_versions": game_versions,
+        "followers": detail.get("thumbsUpCount"),
+        "updated": detail.get("dateModified"),
+        "date_modified": detail.get("dateModified"),
+        "date_created": detail.get("dateCreated"),
+        "server_side": "required" if _has_curseforge_server_pack(detail) else "optional",
+    }
+
+
+def get_modpack_detail_cached(project_id: str, source: str = "modrinth") -> Dict[str, Any]:
     """
-    Modrinth project detail with small TTL cache.
+    Modpack detail with small TTL cache. Supports modrinth and curseforge.
     Raises requests.HTTPError on API failure.
     """
+    source_key = (source or "").strip().lower()
+    if source_key == "curseforge" and project_id.isdigit():
+        mod_id = int(project_id)
+        detail = _fetch_curseforge_mod_detail(mod_id)
+        return _normalize_curseforge_mod_detail(detail)
+
     key = (f"detail:{project_id}", 0, 0, "")
     cached = get_modrinth_cached(key)
     if cached:

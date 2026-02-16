@@ -1,6 +1,8 @@
-from typing import Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
+
+# --- Request models ---
 
 class CreateServerRequest(BaseModel):
     name: str = Field(..., example="My Modded Server")
@@ -21,4 +23,48 @@ class UpdateServerRequest(BaseModel):
 
 
 class CommandRequest(BaseModel):
+    command: str
+
+
+# --- Response models ---
+
+class ServerStatsResponse(BaseModel):
+    ramUsage: float = 0
+    ramTotal: float = 0
+    cpuLoad: float = 0.0
+    latency: Optional[float] = None
+    players: int = 0
+    maxPlayers: int = 20
+
+
+class ServerStatusResponse(BaseModel):
+    status: str
+    stats: Optional[ServerStatsResponse] = None
+
+
+class ServerInstanceResponse(BaseModel):
+    id: str
+    name: str
+    project_id: str
+    version_id: str
+    version_number: Optional[str] = None
+    loader: Optional[str] = None
+    source: Optional[str] = None
+    port: int
+    ram_mb: int
+    status: str
+    container_name: Optional[str] = None
+    minecraft_version: Optional[str] = None
+
+
+class ListServersResponse(BaseModel):
+    items: List[Dict]
+
+
+class LogsResponse(BaseModel):
+    lines: List[str]
+
+
+class CommandResponse(BaseModel):
+    sent: bool
     command: str

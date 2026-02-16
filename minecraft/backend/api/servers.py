@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 from typing import Dict
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 
 from schemas import CreateServerRequest, CommandRequest, UpdateServerRequest
 from services.servers import (
@@ -208,3 +211,56 @@ def api_tail_logs(
     except Exception as exc:
         logger.exception("Failed to tail logs")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/{instance_id}/events")
+async def api_server_events(instance_id: str, request: Request):
+    """
+    GET /api/servers/{instance_id}/events
+    Server-Sent Events (SSE) endpoint that pushes status, stats, and log
+    updates every 2-3 seconds. The client uses EventSource to subscribe.
+
+    Event types:
+      - "status"  : { status, stats }
+      - "logs"    : { lines: string[] }
+    """
+
+    async def event_generator():
+        last_log_count = 0
+        last_status = None
+
+        while True:
+            if await request.is_disconnected():
+                break
+
+            try:
+                status_data = instance_status(instance_id)
+                current_status = status_data.get("status")
+
+                if current_status != last_status:
+                    yield f"event: status\ndata: {json.dumps(status_data)}\n\n"
+                    last_status = current_status
+                else:
+                    yield f"event: status\ndata: {json.dumps(status_data)}\n\n"
+
+                log_lines = tail_logs(instance_id, 200)
+                if len(log_lines) != last_log_count:
+                    new_lines = log_lines[last_log_count:] if last_log_count < len(log_lines) else log_lines[-50:]
+                    yield f"event: logs\ndata: {json.dumps({'lines': new_lines})}\n\n"
+                    last_log_count = len(log_lines)
+
+            except Exception as exc:
+                logger.warning("SSE error for %s: %s", instance_id, exc)
+                yield f"event: error\ndata: {json.dumps({'message': str(exc)})}\n\n"
+
+            await asyncio.sleep(2.5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

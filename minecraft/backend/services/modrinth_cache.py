@@ -1,29 +1,28 @@
-import os
-import time
-from typing import Any, Dict, Tuple
+"""Modrinth search result cache backed by generic TTLCache."""
 
-# Cache key: (query, page, limit, sort)
+import os
+from typing import Any, Tuple
+
+from .ttl_cache import TTLCache
+
 CacheKey = Tuple[str, int, int, str]
 
-_CACHE: Dict[CacheKey, Tuple[float, Any]] = {}
 TTL_SECONDS = int(os.environ.get("MODPACK_MEMORY_CACHE_TTL_SECONDS", "43200"))
 
+_cache: TTLCache[CacheKey, Any] = TTLCache(ttl_seconds=TTL_SECONDS)
+
+
 def get_cached(key: CacheKey):
-    now = time.time()
-    entry = _CACHE.get(key)
-    if not entry:
-        return None
-    ts, value = entry
-    if now - ts > TTL_SECONDS:
-        _CACHE.pop(key, None)
-        return None
-    return value
+    return _cache.get(key)
+
 
 def set_cached(key: CacheKey, value: Any):
-    _CACHE[key] = (time.time(), value)
+    _cache.set(key, value)
+
 
 def clear_cached(key: CacheKey) -> None:
-    _CACHE.pop(key, None)
+    _cache.delete(key)
+
 
 def clear_all() -> None:
-    _CACHE.clear()
+    _cache.clear()

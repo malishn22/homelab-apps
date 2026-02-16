@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { LogLevel } from '../types';
 import type { LogEntry, ServerStats, Server } from '../types';
-import { Square, RefreshCw, Cpu, HardDrive, Terminal, ChevronRight, Play, ArrowDownToLine, Move } from 'lucide-react';
+import { Cpu, HardDrive, Terminal, ChevronRight, ArrowDownToLine, Move } from 'lucide-react';
+import { Button } from './ui';
+import ServerActionButtonController from './ServerActionButtonController';
+import { getStatusTextColor, getStatusDotBgClass } from '../utils';
+import { AUTO_SCROLL_COOLDOWN_MS } from '../constants';
 
 interface ServerConsoleProps {
     server: Server | null;
@@ -34,9 +38,8 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
         }
     }, [logs.length, server?.id, autoScroll]);
 
-    const COOLDOWN_MS = 900;
     const handleScroll = () => {
-        if (Date.now() - lastProgrammaticScrollRef.current < COOLDOWN_MS) return;
+        if (Date.now() - lastProgrammaticScrollRef.current < AUTO_SCROLL_COOLDOWN_MS) return;
         const el = scrollContainerRef.current;
         if (!el) return;
         const { scrollTop, clientHeight, scrollHeight } = el;
@@ -51,9 +54,6 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
         consoleEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
 
-    const isOnline = server?.status === 'ONLINE';
-    const isStarting = server?.status === 'STARTING';
-    const isPreparing = server?.status === 'PREPARING';
     const ramPercent =
         effectiveStats.ramTotal > 0
             ? Math.min(100, (effectiveStats.ramUsage / effectiveStats.ramTotal) * 100)
@@ -71,30 +71,8 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
             : latencyValue < 150
             ? 'bg-yellow-400'
             : 'bg-red-400';
-    const statusColor =
-        effectiveStats.status === 'ONLINE'
-            ? 'text-emerald-400'
-            : effectiveStats.status === 'STARTING'
-            ? 'text-yellow-300'
-            : effectiveStats.status === 'PREPARING'
-            ? 'text-sky-300'
-            : effectiveStats.status === 'ERROR'
-            ? 'text-red-400'
-            : effectiveStats.status === 'MAINTENANCE'
-            ? 'text-red-400'
-            : 'text-text-muted';
-    const statusDotClass =
-        effectiveStats.status === 'ONLINE'
-            ? 'bg-emerald-500'
-            : effectiveStats.status === 'STARTING'
-            ? 'bg-yellow-400'
-            : effectiveStats.status === 'PREPARING'
-            ? 'bg-sky-400'
-            : effectiveStats.status === 'ERROR'
-            ? 'bg-red-500'
-            : effectiveStats.status === 'MAINTENANCE'
-            ? 'bg-red-500'
-            : 'bg-zinc-500';
+    const statusColor = getStatusTextColor(effectiveStats.status);
+    const statusDotClass = getStatusDotBgClass(effectiveStats.status);
 
     const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -195,22 +173,14 @@ const ServerConsole: React.FC<ServerConsoleProps> = ({ server, logs = [], stats,
                         {server ? `Instance ID: ${server.id} • Port ${server.port}` : 'Select a server to view console'}
                     </p>
                 </div>
-                <div className="flex gap-2">
-                    <button
-                        onClick={() => (isOnline ? onRestart?.() : onStart?.())}
-                        disabled={!server || isStarting || isPreparing}
-                        className="flex items-center gap-2 px-4 py-2 bg-bg-surface hover:bg-bg-hover text-white rounded-lg border border-border-main transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                        {isOnline ? <RefreshCw size={16} /> : <Play size={16} />} <span className="hidden sm:inline">{isOnline ? 'Restart' : 'Start'}</span>
-                    </button>
-                    <button
-                        onClick={() => onStop?.()}
-                        disabled={!server || (!isOnline && !isStarting)}
-                        className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 rounded-lg border border-red-500/20 transition-colors shadow-sm shadow-red-900/10 disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                        <Square size={16} fill="currentColor" /> <span className="hidden sm:inline">Stop</span>
-                    </button>
-                </div>
+                <ServerActionButtonController
+                    serverId={server.id}
+                    status={server.status}
+                    onStart={() => onStart?.()}
+                    onStop={() => onStop?.()}
+                    onRestart={() => onRestart?.()}
+                    layout="console"
+                />
             </div>
 
             {/* Stats Row */}

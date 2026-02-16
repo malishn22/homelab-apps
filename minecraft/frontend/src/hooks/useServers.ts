@@ -11,20 +11,23 @@ import {
     fetchStatus as apiFetchStatus,
     sendCommand as apiSendCommand,
     deleteServer as apiDeleteServer,
+    type ServerInstance,
 } from '../api/servers';
+import { getErrorMessage } from '../utils';
+import { POLL_INTERVAL_MS, MAX_LOG_ENTRIES } from '../constants';
 
-function mapInstanceToServer(instance: Record<string, unknown>): Server {
+function mapInstanceToServer(instance: ServerInstance): Server {
     return {
-        id: (instance.id as string) ?? '',
-        name: (instance.name as string) ?? '',
-        type: (instance.loader as string) || 'Modpack',
-        version: (instance.version_number as string) || 'latest',
-        port: (instance.port as number) ?? 25565,
+        id: instance.id ?? '',
+        name: instance.name ?? '',
+        type: instance.loader || 'Modpack',
+        version: instance.version_number || 'latest',
+        port: instance.port ?? 25565,
         status: (instance.status as Server['status']) || 'OFFLINE',
         players: 0,
         maxPlayers: 5,
         ramUsage: 0,
-        ramLimit: typeof instance.ram_mb === 'number' ? Math.round((instance.ram_mb as number) / 1024 * 100) / 100 : 4,
+        ramLimit: typeof instance.ram_mb === 'number' ? Math.round(instance.ram_mb / 1024 * 100) / 100 : 4,
     };
 }
 
@@ -154,7 +157,7 @@ export function useServerLogsAndStats(
                 message,
             };
             const existing = prev[serverId] || [];
-            const merged = [...existing, nextEntry].slice(-400);
+            const merged = [...existing, nextEntry].slice(-MAX_LOG_ENTRIES);
             return { ...prev, [serverId]: merged };
         });
     }, []);
@@ -164,7 +167,7 @@ export function useServerLogsAndStats(
             try {
                 const data = await apiFetchStatus(serverId);
                 const status = (data.status as Server['status']) || 'OFFLINE';
-                const stats = data.stats ?? {};
+                const stats = data.stats ?? {} as Partial<import('../api/servers').ServerStatsPayload>;
                 const prevStatus = lastStatusRef.current[serverId];
                 lastStatusRef.current[serverId] = status;
 
@@ -214,7 +217,7 @@ export function useServerLogsAndStats(
                             level: LogLevel.SUCCESS,
                             message: '[SUCCESS] Completed. Ready to start.',
                         };
-                        return { ...prev, [serverId]: [...existing, successEntry].slice(-400) };
+                        return { ...prev, [serverId]: [...existing, successEntry].slice(-MAX_LOG_ENTRIES) };
                     });
                 }
 
@@ -277,7 +280,7 @@ export function useServerLogsAndStats(
                 if (lines.length > 0) {
                     lastLogTailRef.current[serverId] = lines[lines.length - 1];
                 }
-                return { ...prev, [serverId]: [...existing, ...newEntries].slice(-400) };
+                return { ...prev, [serverId]: [...existing, ...newEntries].slice(-MAX_LOG_ENTRIES) };
             });
         } catch (err) {
             console.error('Failed to fetch logs', err);
@@ -301,8 +304,13 @@ export function useServerLogsAndStats(
                 fetchAndUpdateStatus(serverId);
                 fetchAndUpdateLogs(serverId);
             } catch (err: unknown) {
-                const message = err instanceof Error ? err.message : String(err);
-                appendLog(serverId, `Failed to start: ${message}`, LogLevel.ERROR);
+                const message = getErrorMessage(err);
+                const isCancelled = /cancelled/i.test(message);
+                appendLog(
+                    serverId,
+                    isCancelled ? 'Start cancelled by user.' : `Failed to start: ${message}`,
+                    isCancelled ? LogLevel.INFO : LogLevel.ERROR
+                );
                 setServers((prev) =>
                     prev.map((srv) => (srv.id === serverId ? { ...srv, status: 'OFFLINE' as const } : srv))
                 );
@@ -323,6 +331,9 @@ export function useServerLogsAndStats(
         async (serverId: string) => {
             const server = servers.find((s) => s.id === serverId);
             if (!server) return;
+            setServers((prev) =>
+                prev.map((srv) => (srv.id === serverId ? { ...srv, status: 'STOPPING' as const } : srv))
+            );
             clearServerTimers(serverId);
             appendLog(serverId, 'Stop requested. Flushing world save…', LogLevel.WARN);
             try {
@@ -347,8 +358,11 @@ export function useServerLogsAndStats(
                 }));
                 appendLog(serverId, 'Server stopped.', LogLevel.INFO);
             } catch (err: unknown) {
-                const message = err instanceof Error ? err.message : String(err);
+                const message = getErrorMessage(err);
                 appendLog(serverId, `Failed to stop: ${message}`, LogLevel.ERROR);
+                setServers((prev) =>
+                    prev.map((srv) => (srv.id === serverId ? { ...srv, status: 'OFFLINE' as const } : srv))
+                );
             }
         },
         [servers, clearServerTimers, appendLog, setServers]
@@ -361,7 +375,7 @@ export function useServerLogsAndStats(
             ensureServerStats(server);
             clearServerTimers(serverId);
             setServers((prev) =>
-                prev.map((srv) => (srv.id === serverId ? { ...srv, status: 'STARTING' as const } : srv))
+                prev.map((srv) => (srv.id === serverId ? { ...srv, status: 'RESTARTING' as const } : srv))
             );
             appendLog(serverId, 'Restart requested. Stopping, then starting…', LogLevel.INFO);
             try {
@@ -370,8 +384,13 @@ export function useServerLogsAndStats(
                 fetchAndUpdateStatus(serverId);
                 fetchAndUpdateLogs(serverId);
             } catch (err: unknown) {
-                const message = err instanceof Error ? err.message : String(err);
-                appendLog(serverId, `Failed to restart: ${message}`, LogLevel.ERROR);
+                const message = getErrorMessage(err);
+                const isCancelled = /cancelled/i.test(message);
+                appendLog(
+                    serverId,
+                    isCancelled ? 'Restart cancelled by user.' : `Failed to restart: ${message}`,
+                    isCancelled ? LogLevel.INFO : LogLevel.ERROR
+                );
                 setServers((prev) =>
                     prev.map((srv) => (srv.id === serverId ? { ...srv, status: 'OFFLINE' as const } : srv))
                 );
@@ -395,7 +414,7 @@ export function useServerLogsAndStats(
         apiSendCommand(serverId, trimmed).catch((err) =>
             appendLog(
                 serverId,
-                `Failed to send: ${err instanceof Error ? err.message : err}`,
+                `Failed to send: ${getErrorMessage(err)}`,
                 LogLevel.ERROR
             )
         );
@@ -430,12 +449,17 @@ export function useServerLogsAndStats(
             globalStatIntervalRef.current = null;
         }
         const toPoll = servers.filter(
-            (s) => s.status === 'ONLINE' || s.status === 'STARTING' || s.status === 'PREPARING'
+            (s) =>
+                s.status === 'ONLINE' ||
+                s.status === 'STARTING' ||
+                s.status === 'STOPPING' ||
+                s.status === 'RESTARTING' ||
+                s.status === 'PREPARING'
         );
         if (toPoll.length === 0) return;
         const pollAll = () => toPoll.forEach((s) => fetchAndUpdateStatus(s.id));
         pollAll();
-        globalStatIntervalRef.current = window.setInterval(pollAll, 5000);
+        globalStatIntervalRef.current = window.setInterval(pollAll, POLL_INTERVAL_MS);
         return () => {
             if (globalStatIntervalRef.current != null) {
                 clearInterval(globalStatIntervalRef.current);
@@ -450,11 +474,17 @@ export function useServerLogsAndStats(
         if (!detailServerId) return;
         const detail = servers.find((s) => s.id === detailServerId);
         if (!detail) return;
-        if (detail.status === 'ONLINE' || detail.status === 'STARTING' || detail.status === 'PREPARING') {
+        if (
+            detail.status === 'ONLINE' ||
+            detail.status === 'STARTING' ||
+            detail.status === 'STOPPING' ||
+            detail.status === 'RESTARTING' ||
+            detail.status === 'PREPARING'
+        ) {
             fetchAndUpdateLogs(detail.id);
             logIntervalsRef.current[detail.id] = window.setInterval(
                 () => fetchAndUpdateLogs(detail.id),
-                5000
+                POLL_INTERVAL_MS
             );
         }
         return () => {

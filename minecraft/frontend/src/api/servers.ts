@@ -1,5 +1,52 @@
-const API_BASE = '/api';
-const build = (path: string) => `${API_BASE}${path}`;
+import { api } from './client';
+
+// --- Response types ---
+
+export interface ServerInstance {
+  id: string;
+  name: string;
+  project_id: string;
+  version_id: string;
+  version_number?: string;
+  loader?: string;
+  source?: string;
+  port: number;
+  ram_mb: number;
+  status: string;
+  container_name?: string;
+  minecraft_version?: string;
+  file_url?: string;
+  start_command?: string[];
+}
+
+export interface ListServersResponse {
+  items: ServerInstance[];
+}
+
+export interface ServerStatsPayload {
+  ramUsage?: number;
+  ramTotal?: number;
+  cpuLoad?: number;
+  latency?: number | null;
+  players?: number;
+  maxPlayers?: number;
+}
+
+export interface ServerStatusResponse {
+  status: string;
+  stats?: ServerStatsPayload;
+}
+
+export interface LogsResponse {
+  lines: string[];
+}
+
+export interface CommandResponse {
+  ok: boolean;
+  message?: string;
+}
+
+// --- Payload types ---
 
 export type CreateServerPayload = {
   name: string;
@@ -19,86 +66,48 @@ export type UpdateServerPayload = {
   ram_mb?: number;
 };
 
-async function handleJson<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`API error ${res.status}: ${text || res.statusText}`);
-  }
-  return res.json() as Promise<T>;
-}
+// --- API functions ---
 
-export async function listServers(): Promise<any[]> {
-  const res = await fetch(build('/servers'), { method: 'GET' });
-  const data = await handleJson<{ items: any[] }>(res);
+export async function listServers(): Promise<ServerInstance[]> {
+  const data = await api.get<ListServersResponse>('/servers');
   return data.items || [];
 }
 
-export async function createServer(payload: CreateServerPayload): Promise<any> {
-  const res = await fetch(build('/servers'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  return handleJson<any>(res);
+export async function createServer(payload: CreateServerPayload): Promise<ServerInstance> {
+  return api.post<ServerInstance>('/servers', payload);
 }
 
-export async function updateServer(id: string, payload: UpdateServerPayload): Promise<any> {
-  const res = await fetch(build(`/servers/${id}`), {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  return handleJson<any>(res);
+export async function updateServer(id: string, payload: UpdateServerPayload): Promise<ServerInstance> {
+  return api.patch<ServerInstance>(`/servers/${id}`, payload);
 }
 
-export async function startServer(id: string): Promise<any> {
-  const res = await fetch(build(`/servers/${id}/start`), { method: 'POST' });
-  return handleJson<any>(res);
+export async function startServer(id: string): Promise<{ status: string }> {
+  return api.post<{ status: string }>(`/servers/${id}/start`);
 }
 
-export async function stopServer(id: string): Promise<any> {
-  const res = await fetch(build(`/servers/${id}/stop`), { method: 'POST' });
-  return handleJson<any>(res);
+export async function stopServer(id: string): Promise<{ status: string }> {
+  return api.post<{ status: string }>(`/servers/${id}/stop`);
 }
 
-export async function restartServer(id: string): Promise<any> {
-  const res = await fetch(build(`/servers/${id}/restart`), { method: 'POST' });
-  return handleJson<any>(res);
+export async function restartServer(id: string): Promise<{ status: string }> {
+  return api.post<{ status: string }>(`/servers/${id}/restart`);
 }
 
 export async function deleteServer(id: string): Promise<void> {
-  const res = await fetch(build(`/servers/${id}/delete`), {
-    method: 'POST',
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Delete failed ${res.status}: ${text || res.statusText}`);
-  }
+  await api.post<void>(`/servers/${id}/delete`);
 }
 
-
 export async function fetchLogs(id: string, lines: number): Promise<string[]> {
-  const res = await fetch(build(`/servers/${id}/logs?lines=${lines}`), {
-    method: 'GET',
-  });
-  const data = await handleJson<{ lines: string[] }>(res);
+  const data = await api.get<LogsResponse>(`/servers/${id}/logs?lines=${lines}`);
   return data.lines || [];
 }
 
-export async function fetchStatus(id: string): Promise<any> {
-  // backend exposes both /{id} and /{id}/status; use the explicit one
-  const res = await fetch(build(`/servers/${id}/status`), { method: 'GET' });
-  return handleJson<any>(res);
+export async function fetchStatus(id: string): Promise<ServerStatusResponse> {
+  return api.get<ServerStatusResponse>(`/servers/${id}/status`);
 }
 
-export async function sendCommand(id: string, command: string): Promise<any> {
-  const res = await fetch(build(`/servers/${id}/command`), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ command }),
-  });
-  return handleJson<any>(res);
+export async function sendCommand(id: string, command: string): Promise<CommandResponse> {
+  return api.post<CommandResponse>(`/servers/${id}/command`, { command });
 }
 
 export interface FileEntry {
@@ -114,28 +123,17 @@ export interface FilesResponse {
 
 export async function getFiles(instanceId: string, path: string = ''): Promise<FilesResponse> {
   const params = path ? `?path=${encodeURIComponent(path)}` : '';
-  const res = await fetch(build(`/servers/${instanceId}/files${params}`), { method: 'GET' });
-  return handleJson<FilesResponse>(res);
+  return api.get<FilesResponse>(`/servers/${instanceId}/files${params}`);
 }
 
 export async function writeFile(instanceId: string, path: string, content: string): Promise<void> {
-  const res = await fetch(build(`/servers/${instanceId}/files?path=${encodeURIComponent(path)}`), {
-    method: 'PUT',
-    headers: { 'Content-Type': 'text/plain' },
-    body: content,
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Write failed ${res.status}: ${text || res.statusText}`);
-  }
+  await api.put<void>(
+    `/servers/${instanceId}/files?path=${encodeURIComponent(path)}`,
+    content,
+    { headers: { 'Content-Type': 'text/plain' } },
+  );
 }
 
 export async function deleteFile(instanceId: string, path: string): Promise<void> {
-  const res = await fetch(build(`/servers/${instanceId}/files?path=${encodeURIComponent(path)}`), {
-    method: 'DELETE',
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Delete failed ${res.status}: ${text || res.statusText}`);
-  }
+  await api.delete<void>(`/servers/${instanceId}/files?path=${encodeURIComponent(path)}`);
 }

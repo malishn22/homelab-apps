@@ -44,38 +44,6 @@ class CurseForgeProvider(ModpackProvider):
             return unquote(name)
         return fallback
 
-    def _download(self, url: str, dest: Path) -> None:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        with requests.get(url, stream=True, timeout=120) as resp:
-            resp.raise_for_status()
-            with open(dest, "wb") as fh:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    if chunk:
-                        fh.write(chunk)
-
-    def _extract_archive(self, archive_path: Path, dest_dir: Path) -> None:
-        import zipfile
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        if archive_path.suffix.lower() == ".zip":
-            with zipfile.ZipFile(archive_path, "r") as zf:
-                zf.extractall(dest_dir)
-            return
-        # CurseForge mostly uses zip
-        raise OrchestratorError(f"Unsupported archive format: {archive_path.name}")
-    
-    def _copy_overrides(self, root: Path) -> None:
-        import shutil
-        overrides = root / "overrides"
-        if not overrides.exists():
-            return
-        for item in overrides.rglob("*"):
-            if item.is_dir():
-                continue
-            rel = item.relative_to(overrides)
-            target = root / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(item, target)
-
     # --- Implementation ---
 
     def resolve_server_pack(self, project_id: str, version_id: str) -> str:
@@ -166,43 +134,6 @@ class CurseForgeProvider(ModpackProvider):
         if loader_id.startswith("forge-"):
             return "forge"
         return None
-
-    def _strip_loader_mismatch_mods(self, root: Path, loader: Optional[str]) -> None:
-        """
-        Strip mods incompatible with the detected loader.
-        - forge: strip NeoForge mods (neoforge in name, not forge)
-        - neoforge: strip Forge mods (forge in name, not neoforge)
-        - None: strip NeoForge mods defensively (packs often end up with Forge)
-        """
-        mods_dir = root / "mods"
-        if not mods_dir.exists():
-            return
-        removed_dir = mods_dir / "__loader_mismatch_removed"
-        removed_dir.mkdir(parents=True, exist_ok=True)
-        for jar in mods_dir.rglob("*.jar"):
-            if "__loader_mismatch_removed" in jar.parts:
-                continue
-            name_lower = jar.name.lower()
-            if loader in ("forge", None):
-                if "neoforge" in name_lower and "forge" not in name_lower.replace("neoforge", ""):
-                    try:
-                        target = removed_dir / jar.name
-                        if target.exists():
-                            target.unlink()
-                        jar.rename(target)
-                        _log_line(self.instance_id, f"[PREP] Removed NeoForge mod (incompatible with Forge): {jar.name}")
-                    except Exception as exc:
-                        _log_line(self.instance_id, f"[PREP] Failed to remove {jar.name}: {exc}")
-            elif loader == "neoforge":
-                if "forge" in name_lower and "neoforge" not in name_lower:
-                    try:
-                        target = removed_dir / jar.name
-                        if target.exists():
-                            target.unlink()
-                        jar.rename(target)
-                        _log_line(self.instance_id, f"[PREP] Removed Forge mod (incompatible with NeoForge): {jar.name}")
-                    except Exception as exc:
-                        _log_line(self.instance_id, f"[PREP] Failed to remove {jar.name}: {exc}")
 
     def generate_start_command(
         self,

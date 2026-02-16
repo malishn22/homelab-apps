@@ -3,6 +3,7 @@ import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
 import { getFiles, writeFile } from '../api/servers';
 import { FileText, Check, Loader2, AlertCircle } from 'lucide-react';
+import { Button } from './ui';
 
 const DEBOUNCE_MS = 500;
 const SAVED_MESSAGE_DURATION = 2000;
@@ -152,12 +153,13 @@ const ServerFileEditor: React.FC<ServerFileEditorProps> = ({
             </span>
           )}
           {onClose && (
-            <button
-              className="text-xs text-text-muted hover:text-white px-2 py-1 rounded"
+            <Button
+              variant="ghost"
               onClick={onClose}
+              className="text-xs px-2 py-1"
             >
               Close
-            </button>
+            </Button>
           )}
         </div>
       </div>
