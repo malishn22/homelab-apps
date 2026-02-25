@@ -6,7 +6,9 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
-
+    networks:
+      - homelab
+    
   ghms-frontend:
     image: ghcr.io/malishn22/minecraft-frontend:latest
     container_name: ghms-frontend
@@ -15,3 +17,10 @@ services:
       - "3010:80"
     depends_on:
       - ghms-backend
+    networks:
+      - homelab
+
+networks:
+  homelab:
+    external: true
+    name: homelab
