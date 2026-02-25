@@ -12,6 +12,6 @@ services:
     container_name: ghms-frontend
     restart: unless-stopped
     ports:
-      - "3000:80"
+      - "3010:80"
     depends_on:
       - ghms-backend
