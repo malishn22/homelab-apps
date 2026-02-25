@@ -1,0 +1,53 @@
+# Build from source (local dev). Run from apps/minecraft; for deploy use docker-compose.yml and pull from GHCR.
+services:
+  minecraft-api:
+    build:
+      context: ../..
+      dockerfile: ./backend/Dockerfile
+    container_name: minecraft-api
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - ./.env
+    environment:
+      UVICORN_RELOAD: "false"
+      UVICORN_HOST: 0.0.0.0
+      UVICORN_PORT: ${MINECRAFT_API_PORT:-8000}
+      CONTAINER_DATA_ROOT: /data
+      HOST_SERVERS_ROOT: ${HOMELAB_ROOT:-.}/backend/data/servers
+    volumes:
+      - ${HOMELAB_ROOT:-.}/backend/data/instances:/data/instances
+      - ${HOMELAB_ROOT:-.}/backend/data/servers:/data/servers
+      - ${HOMELAB_ROOT:-.}/backend/data/server-defaults.properties:/data/server-defaults.properties
+      - ${HOMELAB_ROOT:-.}/backend/data/whitelist-defaults.json:/data/whitelist-defaults.json
+      - ${HOMELAB_ROOT:-.}/backend/data/ops-defaults.json:/data/ops-defaults.json
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "${MINECRAFT_API_PORT:-8000}:${MINECRAFT_API_PORT:-8000}"
+    networks:
+      - homelab
+    restart: unless-stopped
+
+  minecraft-web:
+    build:
+      context: ../..
+      dockerfile: ./frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: ""
+    container_name: minecraft-web
+    depends_on:
+      - minecraft-api
+    env_file:
+      - ./.env
+    environment:
+      BACKEND_HOST: minecraft-api
+    ports:
+      - "${MINECRAFT_WEB_PORT:-4173}:${MINECRAFT_WEB_INTERNAL_PORT:-80}"
+    networks:
+      - homelab
+    restart: unless-stopped
+
+networks:
+  homelab:
+    external: true
+    name: homelab
