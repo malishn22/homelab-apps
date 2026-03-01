@@ -21,6 +21,7 @@ services:
       - ${HOMELAB_ROOT}/apps/minecraft/backend/data/server-defaults.properties:/data/server-defaults.properties
       - ${HOMELAB_ROOT}/apps/minecraft/backend/data/whitelist-defaults.json:/data/whitelist-defaults.json
       - ${HOMELAB_ROOT}/apps/minecraft/backend/data/ops-defaults.json:/data/ops-defaults.json
+      - ${HOMELAB_ROOT}/apps/minecraft/backend/data/backups:/data/backups
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "${MINECRAFT_API_PORT:-8000}:${MINECRAFT_API_PORT:-8000}"
