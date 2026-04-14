@@ -9,6 +9,7 @@ server {
     root /usr/share/nginx/html;
     index index.html;
     location /api/ {
+    client_max_body_size 2G;
         proxy_pass http://${BACKEND_HOST:-minecraft-api}:${MINECRAFT_API_PORT};
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
