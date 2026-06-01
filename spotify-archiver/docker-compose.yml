@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-spotify_export}
+      POSTGRES_USER: ${POSTGRES_USER:-spotify}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-spotify} -d ${POSTGRES_DB:-spotify_export}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - homelab
+
+  spotify-export:
+    image: ghcr.io/malishn22/spotify-archiver:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    volumes:
+      - ./exports:/app/exports
+      - ./data:/app/data
+    networks:
+      - homelab
+    labels:
+      ofelia.enabled: "true"
+      ofelia.job-exec.spotify-sync.schedule: "0 0 4 * * 0"
+      ofelia.job-exec.spotify-sync.command: "python -m src.main run"
+
+  ofelia:
+    image: mcuadros/ofelia:latest
+    restart: unless-stopped
+    depends_on:
+      - spotify-export
+    command: daemon --docker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+volumes:
+  pgdata:
+
+networks:
+  homelab:
+    external: true
+    name: homelab

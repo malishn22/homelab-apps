@@ -1,0 +1,27 @@
+services:
+  backend:
+    image: ghcr.io/malishn22/spotify-archiver-backend:latest
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+      - "8889:8000"
+    env_file: .env
+    volumes:
+      - ./.spotify_token_cache:/app/.spotify_cache_dir
+    networks:
+      - homelab
+
+  frontend:
+    image: ghcr.io/malishn22/spotify-archiver-frontend:latest
+    restart: unless-stopped
+    ports:
+      - "3001:80"
+    depends_on:
+      - backend
+    networks:
+      - homelab
+
+networks:
+  homelab:
+    external: true
+    name: homelab
