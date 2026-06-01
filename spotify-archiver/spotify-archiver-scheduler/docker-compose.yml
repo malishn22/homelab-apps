@@ -1,3 +1,5 @@
+name: spotify-archiver
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -28,6 +30,7 @@ services:
     volumes:
       - ./exports:/app/exports
       - ./data:/app/data
+      - ../spotify-archiver-web/.spotify_token_cache:/app/.spotify_cache_dir
     networks:
       - homelab
     labels:

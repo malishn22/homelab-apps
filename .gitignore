@@ -2,12 +2,12 @@
 .env
 .env.*
 
-# Spotify Archiver Web (homelab runtime secrets)
-.spotify_token_cache/
+# Spotify Archiver scheduler runtime data
+spotify-archiver/spotify-archiver-scheduler/data/
+spotify-archiver/spotify-archiver-scheduler/exports/
 
-# Spotify Archiver CLI (homelab runtime data)
-spotify-archiver/data/
-spotify-archiver/exports/
+# Spotify token cache (any subfolder)
+.spotify_token_cache/
 
 # Python
 .venv
