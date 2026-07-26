@@ -1,4 +1,4 @@
-# Build from source (local dev). Run from apps/minecraft; for deploy use docker-compose.yml and pull from GHCR.
+# Build from source (local dev). Run from apps/ghms; for deploy use docker-compose.yml and pull from GHCR.
 services:
   minecraft-api:
     build:

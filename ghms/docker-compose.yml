@@ -11,17 +11,17 @@ services:
       UVICORN_HOST: 0.0.0.0
       UVICORN_PORT: ${MINECRAFT_API_PORT:-8000}
       CONTAINER_DATA_ROOT: /data
-      HOST_SERVERS_ROOT: ${HOMELAB_ROOT}/apps/minecraft/backend/data/servers
+      HOST_SERVERS_ROOT: ${HOMELAB_ROOT}/apps/ghms/backend/data/servers
       MINECRAFT_INSTANCES_NETWORK: minecraft_instances
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ${HOMELAB_ROOT}/apps/minecraft/backend/data/instances:/data/instances
-      - ${HOMELAB_ROOT}/apps/minecraft/backend/data/servers:/data/servers
-      - ${HOMELAB_ROOT}/apps/minecraft/backend/data/server-defaults.properties:/data/server-defaults.properties
-      - ${HOMELAB_ROOT}/apps/minecraft/backend/data/whitelist-defaults.json:/data/whitelist-defaults.json
-      - ${HOMELAB_ROOT}/apps/minecraft/backend/data/ops-defaults.json:/data/ops-defaults.json
-      - ${HOMELAB_ROOT}/apps/minecraft/backend/data/backups:/data/backups
+      - ${HOMELAB_ROOT}/apps/ghms/backend/data/instances:/data/instances
+      - ${HOMELAB_ROOT}/apps/ghms/backend/data/servers:/data/servers
+      - ${HOMELAB_ROOT}/apps/ghms/backend/data/server-defaults.properties:/data/server-defaults.properties
+      - ${HOMELAB_ROOT}/apps/ghms/backend/data/whitelist-defaults.json:/data/whitelist-defaults.json
+      - ${HOMELAB_ROOT}/apps/ghms/backend/data/ops-defaults.json:/data/ops-defaults.json
+      - ${HOMELAB_ROOT}/apps/ghms/backend/data/backups:/data/backups
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "${MINECRAFT_API_PORT:-8000}:${MINECRAFT_API_PORT:-8000}"
