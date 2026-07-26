@@ -1,6 +1,9 @@
 # Env Files
 .env
 .env.*
+# ...but templates are meant to be committed. Without this negation the .env.*
+# rule above silently swallows every .env.example, which is why none were tracked.
+!.env.example
 
 # Spotify Archiver scheduler runtime data
 spotify-archiver/spotify-archiver-scheduler/data/
@@ -23,3 +26,6 @@ frontend/.env.local
 
 # Satisfactory
 satisfactory/satisfactory-server
+
+# Graphify generated output
+graphify-out/
